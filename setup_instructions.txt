@@ -1,0 +1,39 @@
+# Setup Instructions: CarbonMind — Urban CO₂ Decision Intelligence System
+
+This project is a React-based Single Page Application (SPA) powered by Vite.
+
+## 1. Prerequisites
+- Node.js (v18 or higher recommended)
+- npm or yarn
+
+## 2. Installation
+1. Clone or download the project files.
+2. Navigate to the project root directory.
+3. Run the following command to install dependencies:
+   ```bash
+   npm install
+   ```
+
+## 3. Environment Configuration
+The application uses the Google Gemini API for the VayuBot AI assistant.
+1. Create a `.env` file in the root directory (refer to `.env.example`).
+2. Add your Google Gemini API Key:
+   ```env
+   GEMINI_API_KEY=your_api_key_here
+   ```
+
+## 4. Development Server
+To start the local development server with hot recharge:
+```bash
+npm run dev
+```
+The application will be available at `http://localhost:3000` (or the port specified in your console).
+
+## 5. Building for Production
+To generate a production-ready build in the `dist/` folder:
+```bash
+npm run build
+```
+
+## 6. Deployment
+Since this is a client-side Vite application, you can deploy the contents of the `dist/` folder to any static hosting service (Netlify, Vercel, GitHub Pages, or Cloud Run).

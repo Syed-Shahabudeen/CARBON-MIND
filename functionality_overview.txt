@@ -1,0 +1,42 @@
+# Functionality Overview: CarbonMind
+
+CarbonMind is a decision intelligence platform designed to monitor, analyze, and mitigate urban CO₂ levels in Chennai, India.
+
+## Core Features:
+
+### 1. Real-Time Urban Monitoring (Dashboard)
+- Displays current CO₂ PPM (Parts Per Million) levels for 7 distinct Chennai zones:
+  - Perungudi, Velachery, Tambaram, Adyar, T. Nagar, Anna Nagar, and Ambattur.
+- Color-coded status indicators (Good, Fair, Moderate, Poor, Dangerous) based on air quality thresholds.
+- Zone-specific data includes AQI Index and live PPM trends simulated via MQTT-style logic.
+
+### 2. Predictive Forecasting
+- Visualizes 30-minute predictive CO₂ trends using Recharts.
+- Differentiates between "No Action" (business as usual) and "Intervention" (projected improvement) scenarios.
+- AI-driven recommendation summaries based on projected bottlenecks.
+
+### 3. Causal Attribution Analysis
+- Identifies the primary sources of pollution for each zone (e.g., Vehicle Emissions, Industrial Activity, Biomass Burning).
+- Severity-based visualizations help officials understand the "Why" behind high pollution spikes.
+
+### 4. VayuBot AI Assistant
+- Conversational AI powered by the Google Gemini 2.0 Flash API.
+- Aware of current city-wide data (PPM levels, priority nodes).
+- Capable of providing technical recommendations, cost estimations, and ROI analysis.
+- Supports voice input and text-to-speech output.
+
+### 5. Intervention Simulator
+- Interactive tool allowing officials to simulate different mitigation strategies (e.g., Traffic Restrictions, Green Belt Expansion, Industrial Scrubbers).
+- Provides immediate feedback on:
+  - Projected CO₂ reduction percentage.
+  - Estimated implementation cost (in Crores).
+  - Projected timeline for visible results.
+- Features an "AI Optimizer" to calculate the most cost-effective strategy for a specific target.
+
+### 6. Intelligent Report Generation
+- Programmatically generates comprehensive "Mission Intelligence Reports" in PDF format.
+- Includes zone status summaries, causal analysis, and prioritized intervention recommendations.
+
+### 7. Global City Metrics
+- Continuous city-wide monitoring via a scrolling status ticker.
+- Real-time calculation of "Inaction Risk" (economic loss projections for the current quarter).

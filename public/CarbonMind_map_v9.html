@@ -1,0 +1,1893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CarbonMind — Urban CO₂ Decision Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060b12;
+  --accent:#00ff88;
+  --cyan:#00cfff;
+  --critical:#ff2244;
+  --moderate:#ff8800;
+  --watch:#ffdd00;
+  --good:#00ff88;
+  --panel-bg:rgba(4,10,18,0.92);
+  --border:rgba(0,255,136,0.12);
+  --border-glow:rgba(0,255,136,0.28);
+}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:'Rajdhani',sans-serif;color:#c8fce6}
+
+/* SCANLINES - pointer-events:none overlay, contained to not affect map repaints */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,0.03) 0px,rgba(0,0,0,0.03) 1px,transparent 1px,transparent 3px);
+  opacity:0.7;
+  /* No animation here - static scanlines avoid white flicker on zoom repaints */
+}
+
+/* CORNER BRACKETS on body */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9998;
+  background:
+    linear-gradient(to right, var(--accent) 2px, transparent 2px) 0 0,
+    linear-gradient(to bottom, var(--accent) 2px, transparent 2px) 0 0,
+    linear-gradient(to left, var(--accent) 2px, transparent 2px) 100% 0,
+    linear-gradient(to bottom, var(--accent) 2px, transparent 2px) 100% 0,
+    linear-gradient(to right, var(--accent) 2px, transparent 2px) 0 100%,
+    linear-gradient(to top, var(--accent) 2px, transparent 2px) 0 100%,
+    linear-gradient(to left, var(--accent) 2px, transparent 2px) 100% 100%,
+    linear-gradient(to top, var(--accent) 2px, transparent 2px) 100% 100%;
+  background-repeat:no-repeat;
+  background-size:20px 20px;
+  opacity:0.4;
+}
+
+#map{position:absolute;inset:0;top:60px;z-index:1;isolation:isolate}
+
+/* prevent scanlines/pseudo-elements from triggering GPU compositing on map */
+.leaflet-tile-pane{will-change:auto!important}
+.leaflet-zoom-animated{will-change:auto!important}
+
+/* ════════ TOP BAR ════════ */
+#topbar{
+  position:fixed;top:0;left:0;right:0;height:60px;z-index:1000;
+  background:rgba(4,9,16,0.98);border-bottom:1px solid var(--border-glow);
+  display:flex;align-items:center;padding:0 14px;gap:14px;
+  backdrop-filter:blur(24px);
+}
+.logo{
+  font-family:'Orbitron',monospace;font-size:14px;font-weight:900;
+  color:var(--accent);letter-spacing:3px;white-space:nowrap;
+  text-shadow:0 0 16px rgba(0,255,136,0.6),0 0 32px rgba(0,255,136,0.2);
+  display:flex;align-items:center;gap:8px;
+}
+.logo-hex{font-size:18px;animation:hexspin 4s linear infinite;}
+@keyframes hexspin{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}
+
+.stat-block{
+  display:flex;flex-direction:column;gap:1px;
+  border-left:1px solid var(--border);padding-left:12px;min-width:90px;
+}
+.stat-label{font-size:8px;color:rgba(0,255,136,0.45);text-transform:uppercase;letter-spacing:1.5px;font-family:'Share Tech Mono',monospace}
+.stat-value{font-family:'Orbitron',monospace;font-size:11px;font-weight:700;color:#fff}
+
+#live-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);
+  animation:livepulse 1.2s ease-in-out infinite;box-shadow:0 0 10px var(--accent),0 0 20px rgba(0,255,136,0.3);flex-shrink:0}
+@keyframes livepulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.7)}}
+
+.view-btns{display:flex;gap:3px;margin-left:auto}
+.view-btn{
+  font-family:'Share Tech Mono',monospace;font-size:9px;padding:5px 9px;
+  background:transparent;border:1px solid var(--border);color:rgba(0,255,136,0.5);
+  cursor:pointer;border-radius:2px;transition:all 0.2s;letter-spacing:0.5px;white-space:nowrap;
+}
+.view-btn:hover,.view-btn.active{
+  background:rgba(0,255,136,0.08);border-color:var(--accent);color:var(--accent);
+  box-shadow:0 0 10px rgba(0,255,136,0.2);
+}
+.view-btn.danger-btn{border-color:rgba(255,34,68,0.3);color:rgba(255,34,68,0.6)}
+.view-btn.danger-btn:hover,.view-btn.danger-btn.active{background:rgba(255,34,68,0.08);border-color:var(--critical);color:var(--critical);box-shadow:0 0 10px rgba(255,34,68,0.2)}
+.view-btn.cyan-btn{border-color:rgba(0,207,255,0.3);color:rgba(0,207,255,0.6)}
+.view-btn.cyan-btn:hover,.view-btn.cyan-btn.active{background:rgba(0,207,255,0.08);border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 10px rgba(0,207,255,0.2)}
+
+/* ════════ PANELS ════════ */
+.panel{
+  position:absolute;z-index:500;
+  background:var(--panel-bg);
+  border:1px solid var(--border);
+  border-radius:3px;
+  backdrop-filter:blur(16px);
+  box-shadow:0 0 30px rgba(0,255,136,0.04),inset 0 0 30px rgba(0,0,0,0.3);
+}
+.panel-title{
+  font-family:'Orbitron',monospace;font-size:8px;font-weight:700;
+  color:rgba(0,255,136,0.6);letter-spacing:2.5px;text-transform:uppercase;
+  border-bottom:1px solid var(--border);padding:7px 10px;
+  display:flex;align-items:center;gap:6px;
+}
+.panel-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 6px var(--accent);animation:livepulse 2s infinite}
+
+/* ════════ SENSOR FEED ════════ */
+#sensor-panel{left:10px;bottom:10px;width:320px}
+#sensor-feed{padding:8px;height:160px;overflow:hidden;font-family:'Share Tech Mono',monospace;font-size:10.5px}
+.feed-line{padding:3px 5px;border-left:2px solid;margin-bottom:2px;opacity:0;animation:fadein 0.5s forwards;line-height:1.4}
+@keyframes fadein{to{opacity:1}}
+
+/* ════════ INTERVENTION PANEL ════════ */
+#intervention-panel{
+  right:10px;top:70px;width:268px;
+  max-height:calc(100vh - 310px);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+#int-top{padding:10px 10px 0;flex-shrink:0}
+#int-scroll{overflow-y:auto;flex:1;padding:0 10px}
+#int-scroll::-webkit-scrollbar{width:3px}
+#int-scroll::-webkit-scrollbar-thumb{background:rgba(0,255,136,0.2);border-radius:2px}
+#int-reset{padding:6px 10px;flex-shrink:0;border-top:1px solid rgba(255,59,59,0.2)}
+.int-btn{
+  display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;margin-bottom:5px;
+  background:rgba(0,255,136,0.03);border:1px solid var(--border);
+  color:#c8fce6;font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:600;
+  cursor:pointer;border-radius:2px;transition:all 0.2s;text-align:left;
+}
+.int-btn:hover{background:rgba(0,255,136,0.09);border-color:var(--accent);box-shadow:0 0 10px rgba(0,255,136,0.12)}
+.int-btn .emoji{font-size:13px;flex-shrink:0}
+.reset-btn{color:rgba(200,252,230,0.4);border-color:rgba(0,255,136,0.06);font-size:11px}
+
+/* ════════ WIND PANEL ════════ */
+#wind-panel{left:10px;top:70px;width:140px;text-align:center}
+#wind-panel .panel-inner{padding:12px 8px}
+#wind-compass{width:80px;height:80px;margin:0 auto;position:relative}
+.compass-ring{
+  width:80px;height:80px;border-radius:50%;
+  border:1px solid rgba(0,255,136,0.2);
+  position:absolute;top:0;left:0;
+  display:flex;align-items:center;justify-content:center;
+}
+.compass-ring::before{
+  content:'N';position:absolute;top:4px;left:50%;transform:translateX(-50%);
+  font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.5);
+}
+#compass-needle{
+  width:2px;height:28px;background:linear-gradient(to bottom, var(--critical) 50%, var(--accent) 50%);
+  position:absolute;top:50%;left:50%;transform-origin:50% 100%;transform:translate(-50%,-100%) rotate(45deg);
+  /* FIX 1: spring overshoot-and-settle, matches a real compass needle */
+  transition:transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter:drop-shadow(0 0 3px var(--accent));
+}
+.compass-center{
+  width:6px;height:6px;border-radius:50%;background:var(--accent);
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  box-shadow:0 0 8px var(--accent);
+}
+.wind-stats{font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(0,255,136,0.6);margin-top:8px;line-height:1.6}
+.wind-speed-bar{height:3px;background:rgba(0,255,136,0.1);border-radius:2px;margin-top:4px;overflow:hidden}
+.wind-speed-fill{height:100%;background:linear-gradient(to right,var(--accent),var(--cyan));border-radius:2px;transition:width 0.8s}
+
+/* ════════ ZONE RANK PANEL ════════ */
+#rank-panel{right:10px;bottom:10px;width:260px}
+#rank-panel .panel-inner{padding:8px}
+.rank-row{
+  display:flex;align-items:center;gap:8px;padding:5px 6px;margin-bottom:3px;
+  border:1px solid rgba(0,255,136,0.06);border-radius:2px;cursor:pointer;
+  transition:all 0.2s;
+}
+.rank-row:hover{background:rgba(0,255,136,0.06);border-color:rgba(0,255,136,0.2)}
+.rank-num{font-family:'Orbitron',monospace;font-size:9px;color:rgba(0,255,136,0.3);width:14px;flex-shrink:0}
+.rank-name{font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:600;flex:1}
+.rank-ppm{font-family:'Orbitron',monospace;font-size:10px}
+.rank-bar-track{width:50px;height:3px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden;flex-shrink:0}
+.rank-bar-fill{height:100%;border-radius:2px;transition:width 0.5s}
+.rank-delta{font-family:'Share Tech Mono',monospace;font-size:9px;width:28px;text-align:right;flex-shrink:0}
+
+/* ════════ HEALTH INDEX PANEL ════════ */
+#health-panel{left:160px;top:70px;width:180px}
+#health-panel .panel-inner{padding:10px}
+.health-meter{position:relative;width:120px;height:60px;margin:8px auto 4px}
+.health-arc-bg{fill:none;stroke:rgba(0,255,136,0.08);stroke-width:8;stroke-linecap:round}
+.health-arc-fg{fill:none;stroke-width:8;stroke-linecap:round;stroke-dasharray:188 188;transition:stroke-dashoffset 1s,stroke 1s}
+#health-score{font-family:'Orbitron',monospace;font-size:22px;font-weight:900;text-align:center}
+#health-label{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(0,255,136,0.5);text-align:center;letter-spacing:1px}
+.health-stat-row{display:flex;justify-content:space-between;font-family:'Share Tech Mono',monospace;font-size:9px;margin-top:3px}
+.health-key{color:rgba(0,255,136,0.4)}
+.health-val{color:#fff}
+
+/* ════════ AI INSIGHT PANEL ════════ */
+#insight-panel{left:10px;top:220px;width:140px}
+#insight-panel .panel-inner{padding:8px}
+.insight-line{
+  font-family:'Rajdhani',sans-serif;font-size:11px;font-weight:600;
+  padding:4px 6px;margin-bottom:3px;border-radius:2px;line-height:1.4;
+  border-left:2px solid;
+}
+#insight-ticker{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(0,255,136,0.5);margin-top:6px;min-height:24px}
+
+/* ════════ MINI SPARKLINE ════════ */
+.sparkline-wrap{padding:6px 10px 8px}
+.spark-label{font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.4);margin-bottom:4px;letter-spacing:1px}
+#avg-sparkline{display:block;width:100%;height:32px}
+
+/* ════════ ALERT BANNER ════════ */
+#alert-banner{
+  position:fixed;top:66px;left:50%;transform:translateX(-50%);
+  background:linear-gradient(135deg,rgba(200,10,40,0.97),rgba(140,0,30,0.97));
+  border:1px solid rgba(255,68,100,0.8);
+  font-family:'Orbitron',monospace;font-size:11px;font-weight:700;
+  color:#fff;padding:10px 28px;z-index:2000;border-radius:2px;
+  box-shadow:0 0 40px rgba(255,20,60,0.7),0 4px 20px rgba(255,0,0,0.3);
+  letter-spacing:1.5px;display:none;text-align:center;
+  animation:alertpulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes alertpulse{from{box-shadow:0 0 30px rgba(255,20,60,0.5)}to{box-shadow:0 0 50px rgba(255,20,60,0.9),0 0 80px rgba(255,0,0,0.3)}}
+
+/* ════════ TOAST ════════ */
+#toast{
+  position:fixed;bottom:180px;left:50%;transform:translateX(-50%);
+  background:rgba(0,255,136,0.1);border:1px solid var(--accent);
+  font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent);
+  padding:10px 22px;z-index:2000;border-radius:2px;
+  box-shadow:0 0 24px rgba(0,255,136,0.25);
+  display:none;text-align:center;white-space:nowrap;
+}
+
+/* ════════ FLASH ════════ */
+#flash{position:fixed;inset:0;background:rgba(255,0,0,0);z-index:1998;pointer-events:none;transition:background 0.15s}
+
+/* ════════ FORECAST MODAL ════════ */
+#forecast-modal{
+  position:fixed;inset:0;z-index:3000;background:rgba(4,9,16,0.92);
+  backdrop-filter:blur(20px);display:none;align-items:center;justify-content:center;
+}
+#forecast-modal.open{display:flex}
+.modal-box{
+  background:rgba(6,12,20,0.98);border:1px solid var(--border-glow);
+  border-radius:4px;width:560px;max-width:95vw;
+  box-shadow:0 0 60px rgba(0,255,136,0.1);
+}
+.modal-header{
+  padding:16px 20px;border-bottom:1px solid var(--border);
+  font-family:'Orbitron',monospace;font-size:11px;font-weight:700;
+  color:var(--accent);letter-spacing:2px;display:flex;justify-content:space-between;align-items:center;
+}
+.modal-close{background:none;border:1px solid var(--border);color:rgba(0,255,136,0.5);
+  font-family:'Share Tech Mono',monospace;font-size:10px;padding:4px 10px;cursor:pointer;border-radius:2px;transition:all 0.2s}
+.modal-close:hover{border-color:var(--critical);color:var(--critical)}
+.modal-body{padding:16px 20px 20px}
+#forecast-canvas{width:100%;height:160px;display:block}
+.forecast-legend{display:flex;gap:20px;justify-content:center;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:10px}
+.legend-dot{width:8px;height:8px;border-radius:50%}
+.forecast-results{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.fc-result{padding:12px;border-radius:2px;text-align:center}
+.fc-result-label{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;opacity:0.7}
+.fc-result-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;margin-top:4px}
+
+/* ════════ POLLUTION PLUME OVERLAY ════════ */
+.plume{pointer-events:none}
+
+/* ════════ LEAFLET OVERRIDES ════════ */
+.leaflet-popup-content-wrapper{
+  background:rgba(4,9,16,0.98)!important;border:1px solid var(--border-glow)!important;
+  border-radius:3px!important;backdrop-filter:blur(20px);
+  box-shadow:0 0 40px rgba(0,255,136,0.12)!important;
+}
+.leaflet-popup-tip{background:rgba(4,9,16,0.98)!important}
+.leaflet-popup-content{margin:0!important;padding:0!important;color:#c8fce6}
+.leaflet-container{cursor:crosshair}
+
+/* ════════ POPUP ════════ */
+.popup-inner{padding:16px;min-width:260px}
+.popup-zone{font-family:'Orbitron',monospace;font-size:17px;font-weight:900;color:#fff;margin-bottom:2px}
+.popup-coords{font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.35);margin-bottom:8px}
+.popup-ppm{font-family:'Orbitron',monospace;font-size:30px;font-weight:900;margin-bottom:6px;line-height:1}
+.urgency-badge{display:inline-block;padding:3px 10px;border-radius:1px;font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1.5px;margin-bottom:10px}
+.popup-section{font-size:9px;font-family:'Share Tech Mono',monospace;color:rgba(0,255,136,0.4);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:5px;margin-top:10px}
+.bar-row{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-family:'Rajdhani',sans-serif;font-size:11.5px}
+.bar-label{width:76px;color:rgba(200,252,230,0.65);flex-shrink:0}
+.bar-track{flex:1;height:5px;background:rgba(0,255,136,0.07);border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px;transition:width 0.8s}
+.bar-pct{width:30px;text-align:right;font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(200,252,230,0.55)}
+.popup-pred{display:flex;align-items:center;gap:8px;font-family:'Rajdhani',sans-serif;font-size:13px;margin-top:4px}
+.popup-rec{font-family:'Rajdhani',sans-serif;font-size:12px;color:rgba(200,252,230,0.65);margin-top:4px;line-height:1.5}
+.popup-cost{font-family:'Orbitron',monospace;font-size:10px;color:#ff6677;margin-top:6px}
+.popup-aqi-row{display:flex;gap:8px;margin-top:8px}
+.aqi-chip{flex:1;padding:6px 4px;background:rgba(0,0,0,0.3);border-radius:2px;text-align:center;border:1px solid rgba(0,255,136,0.08)}
+.aqi-chip-label{font-family:'Share Tech Mono',monospace;font-size:7px;color:rgba(0,255,136,0.4);letter-spacing:1px}
+.aqi-chip-val{font-family:'Orbitron',monospace;font-size:13px;font-weight:700;margin-top:2px}
+.popup-btn-row{display:flex;gap:6px;margin-top:12px}
+.popup-btn{
+  flex:1;padding:8px 6px;
+  background:rgba(0,255,136,0.06);border:1px solid var(--accent);
+  color:var(--accent);font-family:'Orbitron',monospace;font-size:8px;
+  letter-spacing:0.5px;cursor:pointer;border-radius:2px;
+  transition:all 0.2s;
+}
+.popup-btn:hover{background:rgba(0,255,136,0.14);box-shadow:0 0 14px rgba(0,255,136,0.3)}
+.popup-btn.red{border-color:var(--critical);color:var(--critical);background:rgba(255,34,68,0.05)}
+.popup-btn.red:hover{background:rgba(255,34,68,0.12)}
+
+/* ════════ SMOKE KEYFRAMES ════════ */
+@keyframes outerPulse{0%,100%{transform:scale(1);opacity:0.5}50%{transform:scale(1.6);opacity:0}}
+@keyframes midPulse{0%,100%{transform:scale(1);opacity:0.4}50%{transform:scale(1.35);opacity:0}}
+@keyframes smoke1{0%{transform:translate(0,0) scale(1);opacity:0.6}100%{transform:translate(-10px,-50px) scale(2.5);opacity:0}}
+@keyframes smoke2{0%{transform:translate(0,0) scale(1);opacity:0.5}100%{transform:translate(8px,-46px) scale(2);opacity:0}}
+@keyframes smoke3{0%{transform:translate(0,0) scale(1);opacity:0.7}100%{transform:translate(-5px,-55px) scale(3);opacity:0}}
+@keyframes smoke4{0%{transform:translate(0,0) scale(1);opacity:0.4}100%{transform:translate(12px,-42px) scale(2.2);opacity:0}}
+@keyframes smoke5{0%{transform:translate(0,0) scale(1);opacity:0.6}100%{transform:translate(-14px,-48px) scale(2.8);opacity:0}}
+@keyframes smoke6{0%{transform:translate(0,0) scale(1);opacity:0.3}100%{transform:translate(6px,-60px) scale(3.5);opacity:0}}
+@keyframes smoke7{0%{transform:translate(0,0) scale(1);opacity:0.5}100%{transform:translate(-7px,-44px) scale(2.1);opacity:0}}
+@keyframes smoke8{0%{transform:translate(0,0) scale(1);opacity:0.4}100%{transform:translate(9px,-52px) scale(2.6);opacity:0}}
+
+@keyframes spin360{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+
+/* ════════ MARQUEE ════════ */
+#ticker-wrap{
+  position:fixed;bottom:0;left:0;right:0;height:26px;z-index:1000;
+  background:rgba(4,9,16,0.96);border-top:1px solid var(--border);
+  overflow:hidden;display:flex;align-items:center;
+}
+#ticker-track{
+  display:flex;gap:0;white-space:nowrap;animation:marquee 40s linear infinite;
+}
+@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.ticker-item{
+  font-family:'Share Tech Mono',monospace;font-size:10px;
+  padding:0 18px;display:inline-flex;align-items:center;gap:6px;
+  border-right:1px solid rgba(0,255,136,0.08);
+}
+.ticker-dot{width:5px;height:5px;border-radius:50%}
+
+/* ════════ STATUS RING (bottom right) ════════ */
+#status-ring{
+  position:fixed;bottom:36px;right:10px;z-index:600;
+  width:52px;height:52px;cursor:pointer;
+}
+.status-ring-svg{width:52px;height:52px}
+.status-ring-track{fill:none;stroke:rgba(0,255,136,0.08);stroke-width:4}
+.status-ring-fill{fill:none;stroke-width:4;stroke-linecap:round;transition:stroke-dashoffset 1s,stroke 1s;stroke-dasharray:138 138}
+#status-ring-label{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Orbitron',monospace;font-size:8px;font-weight:900;text-align:center;line-height:1.1;
+}
+
+/* ════════ PREDICTION RIBBON ════════ */
+#pred-ribbon{
+  position:fixed;top:66px;right:280px;z-index:600;
+  background:rgba(4,9,16,0.9);border:1px solid rgba(0,207,255,0.2);
+  border-radius:2px;padding:6px 14px;font-family:'Share Tech Mono',monospace;font-size:9px;
+  color:var(--cyan);letter-spacing:1px;display:none;
+  box-shadow:0 0 16px rgba(0,207,255,0.1);
+}
+
+/* ════════ LOADING OVERLAY ════════ */
+#loading{
+  position:fixed;inset:0;z-index:9990;background:var(--bg);
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;
+}
+.loader-logo{font-family:'Orbitron',monospace;font-size:28px;font-weight:900;color:var(--accent);
+  letter-spacing:4px;text-shadow:0 0 30px rgba(0,255,136,0.6)}
+.loader-bar-wrap{width:300px;height:2px;background:rgba(0,255,136,0.1);border-radius:1px;overflow:hidden}
+.loader-bar{height:100%;background:linear-gradient(to right,var(--accent),var(--cyan));
+  border-radius:1px;width:0;animation:loaderAnim 2s ease-in-out forwards}
+@keyframes loaderAnim{0%{width:0}70%{width:85%}100%{width:100%}}
+.loader-text{font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(0,255,136,0.5);letter-spacing:2px}
+
+/* ════════ SCROLLBAR ════════ */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(0,255,136,0.2);border-radius:2px}
+
+/* ════════ INTERVENTION ANIMATIONS ════════ */
+@keyframes treepop{0%{transform:scale(0) rotate(-20deg)}70%{transform:scale(1.2) rotate(5deg)}100%{transform:scale(1) rotate(0deg)}}
+@keyframes o2rise{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(-60px);opacity:0}}
+@keyframes trafsig{0%{filter:drop-shadow(0 0 3px #ffdd00) brightness(0.7)}100%{filter:drop-shadow(0 0 10px #ffdd00) brightness(1.3)}}
+
+/* ════════ AUTO-OPTIMIZE BUTTON ════════ */
+.auto-opt-btn{
+  width:100%;padding:10px 8px;margin-top:8px;
+  background:linear-gradient(135deg,rgba(0,255,136,0.12),rgba(0,207,255,0.08));
+  border:1px solid rgba(0,255,136,0.5);color:var(--accent);
+  font-family:'Orbitron',monospace;font-size:9px;font-weight:700;letter-spacing:1px;
+  cursor:pointer;border-radius:2px;transition:all 0.2s;
+  box-shadow:0 0 12px rgba(0,255,136,0.1);
+  animation:optpulse 2.5s ease-in-out infinite;
+}
+@keyframes optpulse{0%,100%{box-shadow:0 0 8px rgba(0,255,136,0.1)}50%{box-shadow:0 0 20px rgba(0,255,136,0.35)}}
+.auto-opt-btn:hover{background:linear-gradient(135deg,rgba(0,255,136,0.2),rgba(0,207,255,0.15));box-shadow:0 0 24px rgba(0,255,136,0.4)}
+
+/* ════════ CARBON ABSORPTION PANEL ════════ */
+#absorption-panel{right:280px;bottom:36px;width:200px}
+#absorption-panel .panel-inner{padding:10px}
+.abs-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-family:'Share Tech Mono',monospace;font-size:9px}
+.abs-key{color:rgba(0,255,136,0.45)}
+.abs-val{font-family:'Orbitron',monospace;font-size:11px;font-weight:700}
+.abs-bar-wrap{margin-top:6px}
+.abs-track{height:4px;background:rgba(0,255,136,0.08);border-radius:2px;overflow:hidden;margin-bottom:3px}
+.abs-fill-emit{height:100%;background:linear-gradient(to right,#ff3b3b,#ff8800);border-radius:2px;transition:width 1s}
+.abs-fill-absorb{height:100%;background:linear-gradient(to right,#00ff88,#00cfff);border-radius:2px;transition:width 1s}
+.abs-net{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;text-align:center;margin-top:4px;padding:4px;border-radius:2px}
+
+/* ════════ SENSITIVE ZONES TOGGLE ════════ */
+.sensitive-label{
+  display:flex;align-items:center;gap:6px;padding:5px 6px;
+  font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(200,252,230,0.6);
+  cursor:pointer;border:1px solid rgba(0,255,136,0.06);border-radius:2px;margin-bottom:3px;
+  transition:all 0.2s;
+}
+.sensitive-label:hover{background:rgba(0,255,136,0.05);border-color:rgba(0,255,136,0.15)}
+.sensitive-toggle{width:22px;height:12px;border-radius:6px;border:1px solid rgba(0,255,136,0.3);
+  display:inline-flex;align-items:center;padding:1px;flex-shrink:0;transition:background 0.2s}
+.sensitive-knob{width:8px;height:8px;border-radius:50%;background:rgba(0,255,136,0.3);transition:transform 0.2s,background 0.2s}
+.sensitive-toggle.on{background:rgba(0,255,136,0.2)}
+.sensitive-toggle.on .sensitive-knob{transform:translateX(10px);background:#00ff88}
+
+/* ════════ NO-ACTION SIM BADGE ════════ */
+#noaction-badge{
+  position:fixed;top:66px;left:50%;transform:translateX(-50%);
+  background:rgba(40,0,8,0.96);border:1px solid rgba(255,34,68,0.6);
+  font-family:'Share Tech Mono',monospace;font-size:9px;color:#ff6677;
+  padding:6px 20px;z-index:600;border-radius:2px;display:none;letter-spacing:1px;
+  box-shadow:0 0 20px rgba(255,0,0,0.15);
+}
+
+/* ════════ CONTEXT RECOMMENDATION ════════ */
+#context-rec{
+  background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.15);
+  border-radius:2px;padding:8px;margin-top:6px;
+  font-family:'Rajdhani',sans-serif;font-size:11px;color:rgba(200,252,230,0.75);
+  line-height:1.5;display:none;
+}
+#context-rec .rec-title{font-family:'Orbitron',monospace;font-size:8px;color:var(--accent);letter-spacing:1px;margin-bottom:4px}
+#context-rec .rec-impact{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;margin-top:4px}
+
+/* ════════ RANK PANEL PPM LIVE FLASH ════════ */
+.rank-ppm-live{transition:opacity 0.15s}
+</style>
+</head>
+<body>
+
+<!-- LOADING SCREEN -->
+<div id="loading">
+  <div class="loader-logo">⬡ CARBONMIND</div>
+  <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(0,255,136,0.35);letter-spacing:3px;margin-top:-10px">URBAN CO₂ DECISION INTELLIGENCE</div>
+  <div class="loader-bar-wrap"><div class="loader-bar"></div></div>
+  <div class="loader-text" id="loader-text">INITIALIZING SENSORS...</div>
+</div>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo"><span class="logo-hex">⬡</span> CARBONMIND</div>
+  <div id="live-dot"></div>
+  <div class="stat-block">
+    <div class="stat-label">Chennai Avg</div>
+    <div class="stat-value" id="stat-avg">— ppm</div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Critical Zone</div>
+    <div class="stat-value" id="stat-critical" style="color:var(--critical)">—</div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Health Index</div>
+    <div class="stat-value" id="stat-health">—</div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Wind</div>
+    <div class="stat-value" id="stat-wind">—</div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Updated</div>
+    <div class="stat-value" id="stat-time" style="color:var(--cyan)">—</div>
+  </div>
+  <div class="view-btns">
+    <button class="view-btn active" onclick="setView('co2',this)">CO₂ VIEW</button>
+    <button class="view-btn" onclick="setView('aqi',this)">AQI VIEW</button>
+    <button class="view-btn" onclick="setView('heat',this)">HEAT VIEW</button>
+    <button class="view-btn" onclick="setView('drift',this)">DRIFT VIEW</button>
+    <button class="view-btn cyan-btn" onclick="setView('plume',this)">PLUME VIEW</button>
+    <button class="view-btn danger-btn" onclick="setView('risk',this)">RISK VIEW</button>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<!-- PREDICTION RIBBON -->
+<div id="pred-ribbon">⟳ NEXT 30-MIN FORECAST ACTIVE</div>
+
+<!-- WIND COMPASS PANEL -->
+<div class="panel" id="wind-panel">
+  <div class="panel-title"><span class="panel-dot"></span>WIND</div>
+  <div class="panel-inner">
+    <div id="wind-compass">
+      <div class="compass-ring"></div>
+      <div id="compass-needle"></div>
+      <div class="compass-center"></div>
+    </div>
+    <div class="wind-stats">
+      <div id="wind-text" style="font-size:11px;color:#fff;font-weight:600">NE · 8 km/h</div>
+      <div id="wind-dir-full" style="color:rgba(0,255,136,0.4);font-size:9px">Northeast</div>
+    </div>
+    <div class="wind-speed-bar"><div class="wind-speed-fill" id="wind-speed-fill" style="width:40%"></div></div>
+  </div>
+</div>
+
+<!-- AI INSIGHT PANEL -->
+<div class="panel" id="insight-panel">
+  <div class="panel-title"><span class="panel-dot" style="background:var(--cyan);box-shadow:0 0 6px var(--cyan)"></span>AI INSIGHTS</div>
+  <div class="panel-inner" id="insight-inner">
+    <div class="insight-line" id="insight-1" style="border-color:var(--critical);color:rgba(255,80,100,0.9);background:rgba(255,34,68,0.04)">Loading...</div>
+    <div id="insight-ticker"></div>
+  </div>
+</div>
+
+<!-- HEALTH INDEX PANEL -->
+<div class="panel" id="health-panel">
+  <div class="panel-title"><span class="panel-dot" style="background:#ff9500;box-shadow:0 0 6px #ff9500"></span>CITY HEALTH</div>
+  <div class="panel-inner">
+    <div class="health-meter">
+      <svg width="120" height="60" viewBox="0 0 120 60">
+        <path class="health-arc-bg" d="M10,55 A50,50 0 0,1 110,55"/>
+        <path class="health-arc-fg" id="health-arc" d="M10,55 A50,50 0 0,1 110,55" style="stroke:#00ff88"/>
+      </svg>
+    </div>
+    <div id="health-score" style="color:var(--accent)">--</div>
+    <div id="health-label">COMPUTING...</div>
+    <div class="health-stat-row"><span class="health-key">ZONES CRITICAL</span><span class="health-val" id="hstat-critical">0</span></div>
+    <div class="health-stat-row"><span class="health-key">ZONES SAFE</span><span class="health-val" id="hstat-safe">0</span></div>
+    <div class="health-stat-row"><span class="health-key">AQI PEAK</span><span class="health-val" id="hstat-aqi">—</span></div>
+  </div>
+  <div class="sparkline-wrap">
+    <div class="spark-label">30-MIN AVG PPM HISTORY</div>
+    <canvas id="avg-sparkline"></canvas>
+  </div>
+</div>
+
+<!-- INTERVENTION PANEL -->
+<div class="panel" id="intervention-panel">
+  <div class="panel-title"><span class="panel-dot" style="background:#ff9500;box-shadow:0 0 6px #ff9500"></span>INTERVENTION SIM</div>
+
+  <!-- FIXED TOP: zone select + AI rec -->
+  <div id="int-top">
+    <div style="font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.35);margin-bottom:6px;letter-spacing:1px">SELECT ZONE TARGET:</div>
+    <select id="int-zone-select" onchange="updateContextRec()" style="width:100%;background:rgba(0,0,0,0.4);border:1px solid var(--border);color:rgba(200,252,230,0.8);font-family:'Share Tech Mono',monospace;font-size:9px;padding:5px;border-radius:2px;margin-bottom:6px;letter-spacing:0.5px">
+      <option value="ramapuram">Ramapuram</option>
+      <option value="velachery">Velachery</option>
+      <option value="perungudi">Perungudi</option>
+      <option value="arumbakkam">Arumbakkam</option>
+      <option value="alandur">Alandur</option>
+      <option value="tambaram">Tambaram</option>
+      <option value="tnagar">T. Nagar</option>
+    </select>
+    <div id="context-rec">
+      <div class="rec-title">⬡ AI RECOMMENDATION</div>
+      <div id="context-rec-text">Select a zone to see AI-driven action recommendation.</div>
+      <div class="rec-impact" id="context-rec-impact" style="color:var(--accent)"></div>
+    </div>
+  </div>
+
+  <!-- SCROLLABLE MIDDLE: all action buttons + extras -->
+  <div id="int-scroll">
+    <div style="height:6px"></div>
+    <button class="int-btn" onclick="intervene('trees')"><span class="emoji">🌳</span>Add 500 Trees <span style="font-size:8px;opacity:0.5;margin-left:auto">−30 ppm</span></button>
+    <button class="int-btn" onclick="intervene('trucks')"><span class="emoji">🚌</span>Reroute Trucks — NH716 <span style="font-size:8px;opacity:0.5;margin-left:auto">−20 ppm</span></button>
+    <button class="int-btn" onclick="intervene('industry')"><span class="emoji">🏭</span>Industrial Scrubbing <span style="font-size:8px;opacity:0.5;margin-left:auto">−55 ppm</span></button>
+    <button class="int-btn" onclick="intervene('ev')"><span class="emoji">⚡</span>EV Transition Push <span style="font-size:8px;opacity:0.5;margin-left:auto">−25 ppm</span></button>
+    <button class="int-btn" onclick="intervene('signals')"><span class="emoji">🚦</span>AI Traffic Signals <span style="font-size:8px;opacity:0.5;margin-left:auto">−15 ppm</span></button>
+    <button class="int-btn" onclick="openForecastModalZone(document.getElementById('int-zone-select').value)"><span class="emoji">📈</span>View 30-Min Forecast</button>
+    <button class="auto-opt-btn" onclick="autoOptimize()" style="margin-bottom:8px">⬡ AI AUTO-OPTIMIZE ALL ZONES</button>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.35);margin-bottom:5px;letter-spacing:1px">SENSITIVE ZONES:</div>
+    <label class="sensitive-label" onclick="toggleSensitive('schools')">
+      <span class="sensitive-toggle" id="tog-schools"><span class="sensitive-knob"></span></span>
+      🏫 Schools &amp; Colleges
+    </label>
+    <label class="sensitive-label" onclick="toggleSensitive('hospitals')">
+      <span class="sensitive-toggle" id="tog-hospitals"><span class="sensitive-knob"></span></span>
+      🏥 Hospitals
+    </label>
+    <label class="sensitive-label" onclick="toggleSensitive('noaction')">
+      <span class="sensitive-toggle" id="tog-noaction"><span class="sensitive-knob"></span></span>
+      ⚠ No-Action Simulation
+    </label>
+    <div style="height:4px"></div>
+  </div>
+
+  <!-- PINNED RESET — always at bottom, never hidden -->
+  <div id="int-reset">
+    <button class="int-btn" onclick="intervene('reset')" style="width:100%;margin:0;justify-content:center;background:rgba(255,34,68,0.07);border-color:rgba(255,59,59,0.4);color:rgba(255,100,100,0.9);font-weight:700;letter-spacing:0.5px">
+      <span class="emoji">↺</span>&nbsp; RESET ALL INTERVENTIONS
+    </button>
+  </div>
+</div>
+
+<!-- SENSOR FEED -->
+<div class="panel" id="sensor-panel">
+  <div class="panel-title"><span class="panel-dot"></span>LIVE SENSOR FEED</div>
+  <div id="sensor-feed"></div>
+</div>
+
+<!-- ZONE RANK PANEL -->
+<div class="panel" id="rank-panel">
+  <div class="panel-title"><span class="panel-dot" style="background:var(--watch);box-shadow:0 0 6px var(--watch)"></span>ZONE POLLUTION RANK</div>
+  <div class="panel-inner" id="rank-inner"></div>
+</div>
+
+<!-- STATUS RING -->
+<div id="status-ring" onclick="cycleRingMode()" title="System Status">
+  <svg class="status-ring-svg" viewBox="0 0 52 52">
+    <circle class="status-ring-track" cx="26" cy="26" r="22"/>
+    <circle class="status-ring-fill" id="status-ring-circle" cx="26" cy="26" r="22" transform="rotate(-90 26 26)" stroke="#00ff88"/>
+  </svg>
+  <div id="status-ring-label">SYS<br>OK</div>
+</div>
+
+<!-- CARBON ABSORPTION PANEL -->
+<div class="panel" id="absorption-panel">
+  <div class="panel-title"><span class="panel-dot" style="background:#00cfff;box-shadow:0 0 6px #00cfff"></span>CO₂ BALANCE</div>
+  <div class="panel-inner">
+    <div class="abs-row"><span class="abs-key">EMISSION RATE</span><span class="abs-val" id="abs-emit" style="color:#ff5566">—</span></div>
+    <div class="abs-row"><span class="abs-key">ABSORPTION</span><span class="abs-val" id="abs-absorb" style="color:#00ff88">—</span></div>
+    <div class="abs-bar-wrap">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:7px;color:rgba(0,255,136,0.3);margin-bottom:2px">EMIT</div>
+      <div class="abs-track"><div class="abs-fill-emit" id="abs-emit-bar" style="width:70%"></div></div>
+      <div style="font-family:'Share Tech Mono',monospace;font-size:7px;color:rgba(0,255,136,0.3);margin-bottom:2px">ABSORB</div>
+      <div class="abs-track"><div class="abs-fill-absorb" id="abs-absorb-bar" style="width:30%"></div></div>
+    </div>
+    <div class="abs-net" id="abs-net" style="background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.2);color:#ff5566">NET: +42 t/hr CO₂</div>
+  </div>
+</div>
+
+<!-- NO ACTION SIM BADGE -->
+<div id="noaction-badge">⚠ NO-ACTION MODE: CO₂ RISING — PROJECTED +<span id="noaction-ppm">0</span> ppm IN 30 MIN</div>
+
+<!-- TICKER -->
+<div id="ticker-wrap"><div id="ticker-track"></div></div>
+
+<!-- ALERT BANNER -->
+<div id="alert-banner"></div>
+<div id="toast"></div>
+<div id="flash"></div>
+
+<!-- 30-MIN FORECAST MODAL -->
+<div id="forecast-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span>📈 30-MINUTE CO₂ FORECAST</span>
+      <button class="modal-close" onclick="closeForecastModal()">✕ CLOSE</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(0,255,136,0.4);letter-spacing:1px;margin-bottom:8px" id="fc-zone-label">ZONE: ALL CHENNAI AVG</div>
+      <canvas id="forecast-canvas" style="display:block;width:100%;height:160px;min-height:160px"></canvas>
+      <div class="forecast-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#ff3b3b"></div><span style="color:rgba(255,80,80,0.8)">No Action</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00ff88"></div><span style="color:rgba(0,255,136,0.8)">With Intervention</span></div>
+      </div>
+      <div class="forecast-results">
+        <div class="fc-result" style="background:rgba(255,34,68,0.08);border:1px solid rgba(255,34,68,0.2)">
+          <div class="fc-result-label" style="color:rgba(255,100,100,0.7)">NO ACTION</div>
+          <div class="fc-result-val" style="color:#ff3b3b" id="fc-noval">+32 ppm</div>
+        </div>
+        <div class="fc-result" style="background:rgba(0,255,136,0.06);border:1px solid rgba(0,255,136,0.2)">
+          <div class="fc-result-label" style="color:rgba(0,255,136,0.7)">INTERVENTION</div>
+          <div class="fc-result-val" style="color:#00ff88" id="fc-intval">−68 ppm</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// DATA
+// ════════════════════════════════════════════════════════════
+const ZONES = [
+  {id:'ramapuram',  name:'Ramapuram',   lat:13.0358, lng:80.1818, ppm:88,  level:'WATCH',    base:88,  aqi:65,
+   sources:[{label:'Vehicles',pct:52},{label:'Commercial',pct:30},{label:'Domestic',pct:18}],
+   rec:'Implement signal-sync traffic corridors.',cost:22},
+  {id:'velachery',  name:'Velachery',   lat:12.9815, lng:80.2180, ppm:148, level:'MODERATE', base:148, aqi:121,
+   sources:[{label:'Vehicles',pct:62},{label:'Domestic',pct:24},{label:'Commercial',pct:14}],
+   rec:'Expand EV bus lanes, restrict diesel vehicles.',cost:67},
+  {id:'perungudi',  name:'Perungudi',   lat:12.9574, lng:80.2455, ppm:120, level:'MODERATE', base:120, aqi:134,
+   sources:[{label:'IT Parks',pct:44},{label:'Traffic',pct:38},{label:'Waste',pct:18}],
+   rec:'Mandate DG set alternatives in IT corridors.',cost:82},
+  {id:'arumbakkam', name:'Arumbakkam',  lat:13.0724, lng:80.2090, ppm:125, level:'MODERATE', base:125, aqi:87,
+   sources:[{label:'Vehicles',pct:55},{label:'Commercial',pct:30},{label:'Domestic',pct:15}],
+   rec:'Implement odd-even traffic scheme.',cost:31},
+  {id:'alandur',    name:'Alandur',     lat:13.0001, lng:80.2057, ppm:93,  level:'WATCH',    base:93,  aqi:102,
+   sources:[{label:'Metro Ops',pct:40},{label:'Vehicles',pct:42},{label:'Shops',pct:18}],
+   rec:'Transition depot vehicles to CNG/EV.',cost:44},
+  {id:'tambaram',   name:'Tambaram',    lat:12.9249, lng:80.1000, ppm:73,  level:'GOOD',     base:73,  aqi:61,
+   sources:[{label:'Domestic',pct:50},{label:'Vehicles',pct:35},{label:'Agri',pct:15}],
+   rec:'Maintain green buffer zones.',cost:12},
+  {id:'tnagar',     name:'T. Nagar',    lat:13.0418, lng:80.2341, ppm:62,  level:'GOOD',     base:62,  aqi:44,
+   sources:[{label:'Commercial',pct:48},{label:'Traffic',pct:38},{label:'Domestic',pct:14}],
+   rec:'Green parking and pedestrian zones.',cost:18},
+];
+
+// FIX 2: Project uses only green/yellow/red — no orange.
+// CRITICAL and MODERATE both map to #ff3b3b; WATCH corrected to #ffd60a
+const COLORS={CRITICAL:'#ff3b3b',MODERATE:'#ff3b3b',WATCH:'#ffd60a',GOOD:'#00ff88'};
+const LEVEL_NAMES_FULL={CRITICAL:'CRITICAL',MODERATE:'MODERATE',WATCH:'FAIR',GOOD:'GOOD'};
+const RADII={CRITICAL:4200,MODERATE:2600,WATCH:1900,GOOD:1300};
+const SMOKE_COUNT={CRITICAL:8,MODERATE:5,WATCH:3,GOOD:1};
+const SMOKE_DUR={CRITICAL:1.0,MODERATE:1.6,WATCH:2.5,GOOD:4.5};
+
+let currentView='co2';
+let windAngle=45;
+let windSpeed=8;
+let spikeActive=false;
+let sparkHistory=[];
+let ringMode=0;
+
+// ════════════════════════════════════════════════════════════
+// MAP INIT
+// ════════════════════════════════════════════════════════════
+const map = L.map('map',{zoomControl:false,attributionControl:false}).setView([13.0200,80.1900],12);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  maxZoom:19,subdomains:'abcd'
+}).addTo(map);
+
+// ════════════════════════════════════════════════════════════
+// MARKERS & CIRCLES
+// ════════════════════════════════════════════════════════════
+const markers={}, circles={}, plumeCircles={}, riskOverlays={};
+
+function smokeHTML(zone){
+  const c=COLORS[zone.level];
+  const n=SMOKE_COUNT[zone.level];
+  const dur=SMOKE_DUR[zone.level];
+  let particles='';
+  const anims=['smoke1','smoke2','smoke3','smoke4','smoke5','smoke6','smoke7','smoke8'];
+  for(let i=0;i<n;i++){
+    const sz=2+Math.random()*4|0;
+    const dx=-12+Math.random()*24|0;
+    const dy=-6+Math.random()*6|0;
+    const d=(Math.random()*dur*0.8).toFixed(1);
+    particles+=`<div style="position:absolute;width:${sz}px;height:${sz}px;border-radius:50%;background:${c};left:calc(50% + ${dx}px);top:calc(50% + ${dy}px);animation:${anims[i%8]} ${dur}s ${d}s infinite;opacity:0;filter:blur(1px)"></div>`;
+  }
+  return `
+<div style="position:relative;width:60px;height:60px;cursor:pointer">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:54px;height:54px;border-radius:50%;border:1.5px solid ${c};animation:outerPulse 3s infinite;opacity:0.4"></div>
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:36px;height:36px;border-radius:50%;border:1px solid ${c};animation:midPulse 2s 0.4s infinite;opacity:0.4"></div>
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:${c};box-shadow:0 0 14px ${c},0 0 28px ${c}44,0 0 50px ${c}22"></div>
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Share Tech Mono',monospace;font-size:7px;color:rgba(255,255,255,0.9);text-align:center;width:60px;margin-top:20px;pointer-events:none">${Math.round(zone.ppm)}</div>
+  ${particles}
+</div>`;
+}
+
+function makeIcon(zone){
+  return L.divIcon({className:'',html:smokeHTML(zone),iconSize:[60,60],iconAnchor:[30,30]});
+}
+
+ZONES.forEach(z=>{
+  const m=L.marker([z.lat,z.lng],{icon:makeIcon(z)}).addTo(map);
+  m.on('click',()=>openPopup(z,m));
+  markers[z.id]=m;
+
+  const col=COLORS[z.level];
+  const r=Math.round(RADII[z.level]*(z.ppm/300));
+  const c=L.circle([z.lat,z.lng],{radius:r,color:'none',fillColor:col,fillOpacity:0.10,interactive:false}).addTo(map);
+  circles[z.id]=c;
+
+  // Plume circles (hidden initially)
+  const pc=L.circle([z.lat,z.lng],{radius:r*2.5,color:col,fillColor:col,fillOpacity:0.04,weight:0.5,opacity:0.3,interactive:false,dashArray:'4 4'});
+  plumeCircles[z.id]=pc;
+});
+
+// ════════════════════════════════════════════════════════════
+// DRIFT LINES
+// ════════════════════════════════════════════════════════════
+const driftLines=[];
+// FIX 3: All 7 zones connected in a ring — no isolated markers.
+// Colors use FIX 2 palette (red/yellow/green only).
+// Color is picked dynamically from the higher-PPM zone at draw time.
+function getDriftColor(fromId,toId){
+  const zf=ZONES.find(z=>z.id===fromId);
+  const zt=ZONES.find(z=>z.id===toId);
+  const higher=zf&&zt?(zf.ppm>=zt.ppm?zf:zt):(zf||zt);
+  return higher?COLORS[higher.level]:'#00ff88';
+}
+const driftDefs=[
+  {from:'velachery',  to:'perungudi'},
+  {from:'perungudi',  to:'alandur'},
+  {from:'alandur',    to:'tambaram'},
+  {from:'arumbakkam', to:'tnagar'},
+  {from:'tnagar',     to:'velachery'},
+  {from:'ramapuram',  to:'arumbakkam'},
+  {from:'tambaram',   to:'ramapuram'},
+];
+driftDefs.forEach(d=>{
+  const z1=ZONES.find(z=>z.id===d.from);
+  const z2=ZONES.find(z=>z.id===d.to);
+  const col=getDriftColor(d.from,d.to);
+  const line=L.polyline([[z1.lat,z1.lng],[z2.lat,z2.lng]],{
+    color:col,weight:1.2,opacity:0.45,dashArray:'8 6',interactive:false
+  }).addTo(map);
+  let offset=0;
+  const iv=setInterval(()=>{offset-=2;if(line._path)line._path.style.strokeDashoffset=offset+'px';},50);
+  driftLines.push({line,iv,color:d.color});
+});
+
+// ════════════════════════════════════════════════════════════
+// POPUP
+// ════════════════════════════════════════════════════════════
+let activePopup=null;
+function openPopup(zone,marker){
+  if(activePopup)map.closePopup(activePopup);
+  const c=COLORS[zone.level];
+  const trend=zone.ppm>zone.base?'↑ RISING':'↓ FALLING';
+  const trendColor=zone.ppm>zone.base?'#ff5566':'#00ff88';
+  const pred=Math.round(zone.ppm*(1+(zone.ppm>zone.base?0.07:-0.04)));
+  const bars=zone.sources.map(s=>`
+    <div class="bar-row">
+      <div class="bar-label">${s.label}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${s.pct}%;background:${c}88"></div></div>
+      <div class="bar-pct">${s.pct}%</div>
+    </div>`).join('');
+  const aqiVal=Math.round(zone.ppm*0.9+Math.random()*10);
+  const rh=Math.round(65+Math.random()*20);
+  const tempC=Math.round(29+Math.random()*6);
+  const content=`
+<div class="popup-inner">
+  <div class="popup-zone">${zone.name}</div>
+  <div class="popup-coords">${zone.lat.toFixed(4)}°N, ${zone.lng.toFixed(4)}°E · ZONE ${zone.id.toUpperCase()}</div>
+  <div class="popup-ppm" style="color:${c}">${Math.round(zone.ppm)}<span style="font-size:13px;opacity:0.5"> ppm</span></div>
+  <div><span class="urgency-badge" style="background:${c}18;color:${c};border:1px solid ${c}44">${LEVEL_NAMES_FULL[zone.level]}</span></div>
+  <div class="popup-aqi-row">
+    <div class="aqi-chip"><div class="aqi-chip-label">AQI</div><div class="aqi-chip-val" style="color:${c}">${aqiVal}</div></div>
+    <div class="aqi-chip"><div class="aqi-chip-label">TEMP</div><div class="aqi-chip-val" style="color:#ff9500">${tempC}°C</div></div>
+    <div class="aqi-chip"><div class="aqi-chip-label">RH%</div><div class="aqi-chip-val" style="color:var(--cyan)">${rh}%</div></div>
+    <div class="aqi-chip"><div class="aqi-chip-label">TREND</div><div class="aqi-chip-val" style="color:${trendColor};font-size:10px">${trend}</div></div>
+  </div>
+  <div class="popup-section">Pollution Source Breakdown</div>
+  ${bars}
+  <div class="popup-section">30-Min Prediction</div>
+  <div class="popup-pred">
+    <span style="font-family:'Orbitron',monospace;font-size:16px;color:${trendColor}">${pred} ppm</span>
+    <span style="color:rgba(200,252,230,0.4);font-size:10px;font-family:'Share Tech Mono',monospace">projected</span>
+  </div>
+  <div class="popup-section">Recommended Action</div>
+  <div class="popup-rec">${zone.rec}</div>
+  <div class="popup-cost">⚠ Inaction cost: ₹${zone.cost} Cr/year</div>
+  <div class="popup-btn-row">
+    <button class="popup-btn" onclick="openForecastModalZone('${zone.id}')">📈 FORECAST</button>
+    <button class="popup-btn" onclick="requestAnalysis('${zone.name}')">⬡ AI ANALYSIS</button>
+    <button class="popup-btn red" onclick="deploySOS('${zone.name}')">🚨 SOS</button>
+  </div>
+</div>`;
+  activePopup=L.popup({maxWidth:290,className:'',closeButton:true}).setLatLng([zone.lat,zone.lng]).setContent(content).openOn(map);
+}
+
+function requestAnalysis(name){showToast(`⬡ AI analysis queued for ${name} — ETA 8s`);}
+function deploySOS(name){
+  flashScreen();playBeep();
+  showToast(`🚨 SOS ALERT DISPATCHED — ${name.toUpperCase()} — Municipal Control Room notified`);
+}
+
+// ════════════════════════════════════════════════════════════
+// LIVE DATA SIMULATION
+// ════════════════════════════════════════════════════════════
+function updatePPM(){
+  ZONES.forEach(z=>{
+    const delta=Math.round((Math.random()*10-5)*(z.ppm/100));
+    z.ppm=Math.max(40,z.ppm+delta);
+    updateZoneLevel(z);
+  });
+  updateStats();
+  redrawCircles();
+  updateRankPanel();
+  updateHealthPanel();
+  updateAIInsights();
+}
+
+function updateZoneLevel(z){
+  // FIX 2: align thresholds with Dashboard: GOOD <81, WATCH 81-120 (#ffd60a), MODERATE 121+ (#ff3b3b), CRITICAL 200+ (#ff3b3b)
+  if(z.ppm>=200)z.level='CRITICAL';
+  else if(z.ppm>=121)z.level='MODERATE';
+  else if(z.ppm>=81)z.level='WATCH';
+  else z.level='GOOD';
+}
+
+function redrawCircles(){
+  ZONES.forEach(z=>{
+    const c=circles[z.id];
+    const col=COLORS[z.level];
+    const r=Math.round(RADII[z.level]*(z.ppm/300));
+    c.setStyle({fillColor:col});
+    c.setRadius(r);
+    if(currentView!=='heat'){
+      const m=markers[z.id];
+      m.setIcon(makeIcon(z));
+    }
+  });
+}
+
+// Breathing heatmap
+let breathUp=true,breathOpacity=0.10;
+setInterval(()=>{
+  if(breathUp){breathOpacity+=0.008;if(breathOpacity>=0.16)breathUp=false;}
+  else{breathOpacity-=0.008;if(breathOpacity<=0.06)breathUp=true;}
+  ZONES.forEach(z=>circles[z.id].setStyle({fillOpacity:breathOpacity}));
+},120);
+
+// ════════════════════════════════════════════════════════════
+// SPIKE EVENTS
+// ════════════════════════════════════════════════════════════
+function triggerSpike(){
+  if(spikeActive)return;
+  spikeActive=true;
+  const z=ZONES[Math.floor(Math.random()*ZONES.length)];
+  const origPPM=z.ppm;
+  const spike=(45+Math.random()*50)|0;
+  z.ppm+=spike;
+  updateZoneLevel(z);redrawCircles();
+  flashScreen();playBeep();
+  showAlert(`⚠ CRITICAL SPIKE — ${z.name.toUpperCase()} — ${Math.round(z.ppm)} ppm`);
+  updateStats();updateRankPanel();updateHealthPanel();
+  setTimeout(()=>{
+    z.ppm=origPPM;updateZoneLevel(z);redrawCircles();
+    hideAlert();spikeActive=false;updateStats();updateRankPanel();updateHealthPanel();
+  },20000);
+}
+
+function flashScreen(){
+  const f=document.getElementById('flash');
+  f.style.background='rgba(255,0,0,0.15)';
+  setTimeout(()=>f.style.background='rgba(255,0,0,0)',250);
+}
+function playBeep(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    [880,660,440].forEach((freq,i)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.frequency.value=freq;
+      const t=ctx.currentTime+i*0.12;
+      g.gain.setValueAtTime(0.2,t);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.1);
+      o.start(t);o.stop(t+0.1);
+    });
+  }catch(e){}
+}
+function showAlert(msg){const b=document.getElementById('alert-banner');b.textContent=msg;b.style.display='block';}
+function hideAlert(){document.getElementById('alert-banner').style.display='none';}
+
+// ════════════════════════════════════════════════════════════
+// SENSOR FEED
+// ════════════════════════════════════════════════════════════
+const feed=document.getElementById('sensor-feed');
+function addFeedLine(){
+  const z=ZONES[Math.floor(Math.random()*ZONES.length)];
+  const now=new Date();
+  const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const trend=z.ppm>z.base?'↑ rising':'↓ falling';
+  const line=document.createElement('div');
+  line.className='feed-line';
+  line.style.borderColor=COLORS[z.level];
+  line.style.color=COLORS[z.level];
+  const noiseVal=(Math.round(z.ppm)+(Math.random()*4-2)|0);
+  line.textContent=`${t} · ${z.name.padEnd(11)} · ${noiseVal} ppm · ${trend}`;
+  feed.insertBefore(line,feed.firstChild);
+  while(feed.children.length>10)feed.removeChild(feed.lastChild);
+}
+
+// ════════════════════════════════════════════════════════════
+// STATS BAR
+// ════════════════════════════════════════════════════════════
+function updateStats(){
+  const avg=Math.round(ZONES.reduce((s,z)=>s+z.ppm,0)/ZONES.length);
+  document.getElementById('stat-avg').textContent=avg+' ppm';
+  sparkHistory.push(avg);if(sparkHistory.length>30)sparkHistory.shift();
+  drawSparkline();
+  const crit=ZONES.reduce((m,z)=>z.ppm>m.ppm?z:m,ZONES[0]);
+  document.getElementById('stat-critical').textContent=`${crit.name} · ${Math.round(crit.ppm)}`;
+  const now=new Date();
+  document.getElementById('stat-time').textContent=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  // Health index (0-100, lower ppm = higher health)
+  const healthScore=Math.max(0,Math.min(100,Math.round(100-(avg-60)/1.8)));
+  document.getElementById('stat-health').textContent=healthScore+'/100';
+  document.getElementById('stat-health').style.color=healthScore>70?'#00ff88':healthScore>45?'#ff9500':'#ff2244';
+  updateStatusRing(healthScore,avg);
+  updateTicker();
+}
+
+// ════════════════════════════════════════════════════════════
+// HEALTH PANEL
+// ════════════════════════════════════════════════════════════
+function updateHealthPanel(){
+  const avg=Math.round(ZONES.reduce((s,z)=>s+z.ppm,0)/ZONES.length);
+  const score=Math.max(0,Math.min(100,Math.round(100-(avg-60)/1.8)));
+  const critCount=ZONES.filter(z=>z.level==='CRITICAL').length;
+  const safeCount=ZONES.filter(z=>z.level==='GOOD').length;
+  const peakAQI=Math.max(...ZONES.map(z=>Math.round(z.ppm*0.92)));
+  document.getElementById('health-score').textContent=score;
+  const label=score>75?'HEALTHY':score>55?'MODERATE':score>35?'DEGRADED':'CRITICAL';
+  document.getElementById('health-label').textContent=label;
+  const scoreColor=score>75?'#00ff88':score>55?'#ff9500':'#ff2244';
+  document.getElementById('health-score').style.color=scoreColor;
+  document.getElementById('hstat-critical').textContent=critCount;
+  document.getElementById('hstat-safe').textContent=safeCount;
+  document.getElementById('hstat-aqi').textContent=peakAQI;
+  // Arc: total arc is ~188 units for semicircle
+  const arc=document.getElementById('health-arc');
+  const dashOffset=188-(score/100)*188;
+  arc.style.strokeDashoffset=dashOffset;
+  arc.style.stroke=scoreColor;
+}
+
+// Health micro-flicker: score number wiggles ±1-2 to feel live
+setInterval(()=>{
+  const el=document.getElementById('health-score');
+  if(!el)return;
+  const base=parseInt(el.dataset.base||el.textContent)||70;
+  el.dataset.base=base;
+  const noise=Math.round(Math.random()*3-1);
+  el.textContent=Math.max(0,Math.min(100,base+noise));
+  // Also flicker AQI peak
+  const aqiEl=document.getElementById('hstat-aqi');
+  if(aqiEl){const av=parseInt(aqiEl.dataset.base||aqiEl.textContent)||120;aqiEl.dataset.base=av;aqiEl.textContent=av+(Math.round(Math.random()*5-2));}
+},1800);
+
+// ════════════════════════════════════════════════════════════
+// RANK PANEL — live per-row fluctuation
+// ════════════════════════════════════════════════════════════
+const rankFlicker={};  // zoneId -> small display noise offset
+function updateRankPanel(){
+  const sorted=[...ZONES].sort((a,b)=>b.ppm-a.ppm);
+  const maxPPM=sorted[0].ppm;
+  const inner=document.getElementById('rank-inner');
+  // Flicker: each zone gets a tiny ±1-3 display noise
+  sorted.forEach(z=>{ rankFlicker[z.id]=(rankFlicker[z.id]||0)+(Math.random()*2-1); rankFlicker[z.id]=Math.max(-3,Math.min(3,rankFlicker[z.id]));});
+  inner.innerHTML=sorted.map((z,i)=>{
+    const c=COLORS[z.level];
+    const displayPPM=Math.round(z.ppm+rankFlicker[z.id]);
+    const barW=Math.round((displayPPM/maxPPM)*100);
+    const delta=Math.round(z.ppm-z.base);
+    const deltaSign=delta>=0?'+':'-';
+    const deltaAbs=Math.abs(delta);
+    const deltaColor=delta>0?'#ff5566':'#00ff88';
+    const trend=delta>0?'▲':'▼';
+    const trendAnim=delta>0?'rankup':'rankdown';
+    // Mini sparkbar (5 history samples faked per zone)
+    const miniH=z.ppm>z.base?'▁▂▃▄▅':'▅▄▃▂▁';
+    return `<div class="rank-row" onclick="flyToZone('${z.id}')">
+      <div class="rank-num">${i+1}</div>
+      <div class="rank-name" style="color:${c}">${z.name}</div>
+      <div class="rank-ppm rank-ppm-live" id="rp-${z.id}" style="color:${c}">${displayPPM}</div>
+      <div class="rank-bar-track"><div class="rank-bar-fill" style="width:${barW}%;background:${c}88;transition:width 0.8s ease"></div></div>
+      <div class="rank-delta" style="color:${deltaColor}">${deltaSign}${deltaAbs}</div>
+    </div>`;
+  }).join('');
+}
+
+function flyToZone(id){
+  const z=ZONES.find(z=>z.id===id);
+  if(!z)return;
+  map.flyTo([z.lat,z.lng],14,{duration:1.2});
+  setTimeout(()=>openPopup(z,markers[id]),1200);
+}
+
+// Fast rank micro-tick: only updates the PPM numbers every 1.2s for live feel
+setInterval(()=>{
+  ZONES.forEach(z=>{
+    const el=document.getElementById('rp-'+z.id);
+    if(el){
+      const noise=Math.round(Math.random()*4-2);
+      el.textContent=Math.max(35,Math.round(z.ppm+noise));
+      el.style.opacity='0.6';
+      setTimeout(()=>{if(el)el.style.opacity='1';},120);
+    }
+  });
+},1200);
+
+// ════════════════════════════════════════════════════════════
+// SPARKLINE
+// ════════════════════════════════════════════════════════════
+function drawSparkline(){
+  const canvas=document.getElementById('avg-sparkline');
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  canvas.width=canvas.offsetWidth*2;canvas.height=64;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(sparkHistory.length<2)return;
+  const W=canvas.width,H=canvas.height;
+  const mn=Math.min(...sparkHistory)-10,mx=Math.max(...sparkHistory)+10;
+  const pts=sparkHistory.map((v,i)=>({
+    x:(i/(sparkHistory.length-1))*W,
+    y:H-((v-mn)/(mx-mn))*(H-8)-4
+  }));
+  // Gradient fill
+  const grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,'rgba(0,255,136,0.18)');
+  grd.addColorStop(1,'rgba(0,255,136,0)');
+  ctx.beginPath();ctx.moveTo(pts[0].x,H);
+  pts.forEach(p=>ctx.lineTo(p.x,p.y));
+  ctx.lineTo(pts[pts.length-1].x,H);ctx.closePath();
+  ctx.fillStyle=grd;ctx.fill();
+  // Line
+  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+  pts.forEach((p,i)=>{if(i>0)ctx.lineTo(p.x,p.y)});
+  ctx.strokeStyle='rgba(0,255,136,0.6)';ctx.lineWidth=1.5;ctx.stroke();
+  // Last dot
+  const lp=pts[pts.length-1];
+  ctx.beginPath();ctx.arc(lp.x,lp.y,2.5,0,Math.PI*2);
+  ctx.fillStyle='#00ff88';ctx.fill();
+}
+
+// ════════════════════════════════════════════════════════════
+// STATUS RING
+// ════════════════════════════════════════════════════════════
+function updateStatusRing(score,avg){
+  const ring=document.getElementById('status-ring-circle');
+  const label=document.getElementById('status-ring-label');
+  const pct=score/100;
+  const circ=138;
+  ring.style.strokeDashoffset=(circ-(circ*pct));
+  const col=score>70?'#00ff88':score>45?'#ff9500':'#ff2244';
+  ring.style.stroke=col;
+  const modes=['SYS\nOK','AVG\nPPM','HLTH'];
+  if(ringMode===0){label.innerHTML='SYS<br>'+(score>70?'OK':'⚠');label.style.color=col;}
+  else if(ringMode===1){label.innerHTML=avg+'<br><span style="font-size:6px">PPM</span>';label.style.color=col;}
+  else{label.innerHTML=score+'<br><span style="font-size:6px">HLTH</span>';label.style.color=col;}
+}
+function cycleRingMode(){ringMode=(ringMode+1)%3;}
+
+// ════════════════════════════════════════════════════════════
+// AI INSIGHTS (simulated)
+// ════════════════════════════════════════════════════════════
+const INSIGHTS=[
+  {text:'Perungudi DG sets spiking — recommend immediate inspection',color:'#ff3b3b',border:'var(--critical)'},
+  {text:'Wind shift NE→SE may carry Velachery plume toward Tambaram',color:'#ff9500',border:'var(--moderate)'},
+  {text:'Tambaram holding safe — green buffer zones effective',color:'#00ff88',border:'var(--good)'},
+  {text:'Arumbakkam: PM2.5 correlates with Monday morning traffic surge',color:'#ffdd00',border:'var(--watch)'},
+  {text:'Alandur metro ops causing 40% of local CO₂ — diesel fleet',color:'#ff9500',border:'var(--moderate)'},
+  {text:'T.Nagar commercial strip: peak hours 18:00–20:00 risk window',color:'#ffdd00',border:'var(--watch)'},
+  {text:'Ramapuram: signal-sync intervention projected −18 ppm in 3 weeks',color:'#00ff88',border:'var(--good)'},
+  {text:'Industrial corridor: scrubber efficiency below 60% — critical',color:'#ff3b3b',border:'var(--critical)'},
+];
+let insightIdx=0;
+function updateAIInsights(){
+  const ins=INSIGHTS[insightIdx%INSIGHTS.length];
+  const el=document.getElementById('insight-1');
+  el.textContent=ins.text;
+  el.style.color=ins.color;
+  el.style.borderColor=ins.border;
+  el.style.background=ins.color.includes('ff3b')||ins.color.includes('ff22')?'rgba(255,34,68,0.05)':
+    ins.color.includes('9500')?'rgba(255,149,0,0.05)':
+    ins.color.includes('dd00')?'rgba(255,221,0,0.05)':
+    'rgba(0,255,136,0.04)';
+  insightIdx++;
+  // Ticker
+  const tickers=['■ CARBONMIND AI v2.3 ACTIVE','◆ 7 ZONES MONITORED','▲ NEXT FORECAST IN 28 MIN'];
+  document.getElementById('insight-ticker').textContent=tickers[insightIdx%tickers.length];
+}
+
+// ════════════════════════════════════════════════════════════
+// WIND
+// ════════════════════════════════════════════════════════════
+const DIRS_FULL=['North','Northeast','East','Southeast','South','Southwest','West','Northwest'];
+const DIRS=['N','NE','E','SE','S','SW','W','NW'];
+function updateWind(){
+  // FIX 1: ±20–35° swing per update — noticeable but not erratic
+  const swing=(20+Math.random()*15)*(Math.random()<0.5?1:-1);
+  windAngle=(windAngle+swing+360)%360;
+  windSpeed=5+Math.random()*10|0;
+  const idx=Math.round(windAngle/45)%8;
+  const dir=DIRS[idx];
+  // spring cubic-bezier transition is set on the CSS class; just update transform
+  document.getElementById('compass-needle').style.transform=`translate(-50%,-100%) rotate(${windAngle}deg)`;
+  document.getElementById('wind-text').textContent=`${dir} · ${windSpeed} km/h`;
+  document.getElementById('wind-dir-full').textContent=DIRS_FULL[idx];
+  document.getElementById('stat-wind').textContent=`${dir} · ${windSpeed} km/h`;
+  document.getElementById('wind-speed-fill').style.width=Math.min(100,(windSpeed/20)*100)+'%';
+}
+
+// ════════════════════════════════════════════════════════════
+// INTERVENTION — FULL MAP VISUAL SYSTEM
+// ════════════════════════════════════════════════════════════
+
+// Road corridor waypoints per zone (NH716 bypass-style)
+const REROUTE_PATHS = {
+  ramapuram:  [[13.0358,80.1818],[13.0280,80.1650],[13.0150,80.1500],[12.9900,80.1450],[12.9750,80.1600],[12.9600,80.1700]],
+  velachery:  [[12.9815,80.2180],[12.9700,80.2000],[12.9600,80.1850],[12.9500,80.1750],[12.9350,80.1650]],
+  perungudi:  [[12.9574,80.2455],[12.9650,80.2280],[12.9700,80.2100],[12.9750,80.1950],[12.9800,80.1800]],
+  arumbakkam: [[13.0724,80.2090],[13.0850,80.1900],[13.0950,80.1750],[13.1000,80.1600],[13.0950,80.1450]],
+  alandur:    [[13.0001,80.2057],[12.9850,80.1950],[12.9750,80.1850],[12.9650,80.1700],[12.9500,80.1600]],
+  tambaram:   [[12.9249,80.1000],[12.9100,80.0850],[12.9000,80.0700],[12.8850,80.0600],[12.8700,80.0500]],
+  tnagar:     [[13.0418,80.2341],[13.0300,80.2200],[13.0200,80.2050],[13.0100,80.1900],[12.9950,80.1800]],
+};
+const SCRUBBER_OFFSETS = [[0.004,0.004],[-0.004,0.004],[0.004,-0.004],[-0.004,-0.004]];
+const EV_CORRIDOR = {
+  ramapuram: [[13.0358,80.1818],[13.0300,80.1900],[13.0230,80.2000],[13.0150,80.2100]],
+  velachery: [[12.9815,80.2180],[12.9900,80.2200],[12.9980,80.2250],[13.0060,80.2300]],
+  perungudi: [[12.9574,80.2455],[12.9500,80.2520],[12.9430,80.2580],[12.9360,80.2640]],
+  arumbakkam:[[13.0724,80.2090],[13.0800,80.2150],[13.0880,80.2200],[13.0950,80.2240]],
+  alandur:   [[13.0001,80.2057],[13.0080,80.2100],[13.0150,80.2150],[13.0220,80.2200]],
+  tambaram:  [[12.9249,80.1000],[12.9180,80.1060],[12.9110,80.1120],[12.9040,80.1180]],
+  tnagar:    [[13.0418,80.2341],[13.0490,80.2380],[13.0560,80.2420],[13.0630,80.2460]],
+};
+// interventionLayers[zoneId][type] = layer array; applyCounts[zoneId][type] = 0|1|2
+const interventionLayers={};
+const applyCounts={};
+
+function getZoneLayers(zid,type){
+  if(!interventionLayers[zid])interventionLayers[zid]={};
+  if(!interventionLayers[zid][type])interventionLayers[zid][type]=[];
+  return interventionLayers[zid][type];
+}
+function clearZoneType(zid,type){
+  (getZoneLayers(zid,type)).forEach(l=>{
+    if(l&&typeof l.remove==='function')l.remove();
+    else if(l)try{map.removeLayer(l);}catch(e){}
+  });
+  interventionLayers[zid][type]=[];
+}
+function addL(zid,type,layer){
+  getZoneLayers(zid,type).push(layer);
+  try{map.addLayer(layer);}catch(e){}
+}
+function getCount(zid,type){return(applyCounts[zid]||{})[type]||0;}
+function bumpCount(zid,type){
+  if(!applyCounts[zid])applyCounts[zid]={};
+  applyCounts[zid][type]=(applyCounts[zid][type]||0)+1;
+}
+function resetCounts(zid){
+  if(zid)applyCounts[zid]={};
+  else Object.keys(applyCounts).forEach(k=>{applyCounts[k]={};});
+}
+
+function pulseZoneMarker(z,color){
+  const ring=L.circle([z.lat,z.lng],{radius:800,color,fillColor:color,fillOpacity:0,weight:3,opacity:0.9,interactive:false}).addTo(map);
+  let r=800;
+  const iv=setInterval(()=>{r+=120;ring.setRadius(r);ring.setStyle({opacity:Math.max(0,0.9-(r-800)/4000)});if(r>3800){clearInterval(iv);try{map.removeLayer(ring);}catch(e){}}},40);
+}
+
+// ── TRUCKS ───────────────────────────────────────────────────
+function showRerouteVisual(z,applyNum){
+  const T='trucks'; clearZoneType(z.id,T);
+  const path=REROUTE_PATHS[z.id]||[[z.lat,z.lng],[z.lat-0.02,z.lng-0.02]];
+  // Blocked road on first apply only
+  if(applyNum===1){
+    const bl=L.polyline(path.slice(0,Math.ceil(path.length/2)+1),{color:'#ff3b3b',weight:5,opacity:0.5,dashArray:'6 8',interactive:false});
+    addL(z.id,T,bl);
+    const ne=L.marker(path[0],{icon:L.divIcon({className:'',html:`<div style="font-size:18px;filter:drop-shadow(0 0 6px #ff3b3b)">🚫</div>`,iconSize:[22,22],iconAnchor:[11,11]})});
+    addL(z.id,T,ne);
+  }
+  // Bypass line
+  const bp=L.polyline(path,{color:'#00cfff',weight:4,opacity:0,dashArray:'10 5',interactive:false});
+  addL(z.id,T,bp);
+  let op=0;const fi=setInterval(()=>{op=Math.min(0.85,op+0.05);bp.setStyle({opacity:op});if(op>=0.85)clearInterval(fi);},40);
+  let doff=0;const di=setInterval(()=>{doff-=3;if(bp._path)bp._path.style.strokeDashoffset=doff+'px';},40);
+  getZoneLayers(z.id,T).push({remove:()=>{clearInterval(fi);clearInterval(di);}});
+  // Moving truck
+  let step=0;
+  const tm=L.marker(path[0],{icon:L.divIcon({className:'',html:`<div style="font-size:14px;filter:drop-shadow(0 0 4px #00cfff)">🚛</div>`,iconSize:[18,18],iconAnchor:[9,9]})});
+  addL(z.id,T,tm);
+  const mv=setInterval(()=>{step=(step+1)%path.length;tm.setLatLng(path[step]);},300);
+  getZoneLayers(z.id,T).push({remove:()=>clearInterval(mv)});
+  // Label
+  const lbl=L.marker(path[Math.floor(path.length/2)],{icon:L.divIcon({className:'',html:`<div style="background:rgba(0,207,255,0.9);color:#000;font-family:'Orbitron',monospace;font-size:8px;font-weight:900;padding:2px 8px;border-radius:2px;white-space:nowrap;box-shadow:0 0 10px #00cfff">BYPASS ROUTE${applyNum>1?' — EXTENDED':''} ACTIVE</div>`,iconSize:[190,18],iconAnchor:[95,9]})});
+  addL(z.id,T,lbl);
+  // 2nd apply adds parallel alt route
+  if(applyNum===2){
+    const ext=path.map(p=>[p[0]+0.004,p[1]+0.003]);
+    const el=L.polyline(ext,{color:'#00ff88',weight:3,opacity:0.7,dashArray:'8 6',interactive:false});
+    addL(z.id,T,el);
+    let ed=0;const ei=setInterval(()=>{ed-=3;if(el._path)el._path.style.strokeDashoffset=ed+'px';},40);
+    getZoneLayers(z.id,T).push({remove:()=>clearInterval(ei)});
+    const em=L.marker(ext[0],{icon:L.divIcon({className:'',html:`<div style="font-size:13px;filter:drop-shadow(0 0 4px #00ff88)">🚛</div>`,iconSize:[16,16],iconAnchor:[8,8]})});
+    addL(z.id,T,em);let es=0;const emv=setInterval(()=>{es=(es+1)%ext.length;em.setLatLng(ext[es]);},350);
+    getZoneLayers(z.id,T).push({remove:()=>clearInterval(emv)});
+    const el2=L.marker(ext[Math.floor(ext.length/2)],{icon:L.divIcon({className:'',html:`<div style="background:rgba(0,255,136,0.85);color:#000;font-family:'Orbitron',monospace;font-size:7px;padding:2px 6px;border-radius:2px;white-space:nowrap">ALT ROUTE 2</div>`,iconSize:[90,16],iconAnchor:[45,8]})});
+    addL(z.id,T,el2);
+  }
+  map.flyTo([z.lat,z.lng],13,{duration:1.0});
+}
+
+// ── TREES ────────────────────────────────────────────────────
+function showTreesVisual(z,applyNum){
+  const T='trees'; clearZoneType(z.id,T);
+  const base=[
+    [z.lat+0.005,z.lng+0.005],[z.lat+0.007,z.lng-0.004],[z.lat-0.005,z.lng+0.007],[z.lat-0.006,z.lng-0.005],
+    [z.lat+0.003,z.lng+0.009],[z.lat-0.008,z.lng+0.002],[z.lat+0.009,z.lng-0.002],[z.lat-0.002,z.lng-0.009],
+    [z.lat+0.006,z.lng+0.000],[z.lat-0.004,z.lng+0.006],[z.lat+0.001,z.lng-0.007],[z.lat-0.007,z.lng-0.003],
+  ];
+  const extra=[
+    [z.lat+0.011,z.lng+0.008],[z.lat-0.010,z.lng+0.009],[z.lat+0.008,z.lng-0.011],[z.lat-0.009,z.lng-0.008],
+    [z.lat+0.012,z.lng-0.005],[z.lat-0.003,z.lng+0.013],[z.lat+0.004,z.lng+0.012],[z.lat-0.011,z.lng-0.001],
+  ];
+  const positions=applyNum===2?[...base,...extra]:base;
+  // Green belt polygon
+  const poly=L.polygon([...base.slice(0,8),base[0]],{color:'#00ff88',fillColor:'#00ff88',fillOpacity:0,weight:1.5,opacity:0,dashArray:'4 6',interactive:false});
+  addL(z.id,T,poly);
+  let bop=0;const bfi=setInterval(()=>{bop=Math.min(1,bop+0.04);poly.setStyle({opacity:bop,fillOpacity:bop*0.1});if(bop>=1)clearInterval(bfi);},40);
+  getZoneLayers(z.id,T).push({remove:()=>clearInterval(bfi)});
+  // Trees — staggered appearance
+  positions.forEach((pos,i)=>{
+    setTimeout(()=>{
+      const sz=11+(Math.random()*7|0);
+      const tr=L.marker(pos,{icon:L.divIcon({className:'',html:`<div style="font-size:${sz}px;line-height:1;filter:drop-shadow(0 0 4px rgba(0,255,136,0.7));animation:treepop 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards;transform:scale(0)">🌳</div>`,iconSize:[sz+4,sz+4],iconAnchor:[(sz+4)/2,(sz+4)/2]})});
+      addL(z.id,T,tr);
+    },i*80);
+  });
+  // Label
+  const treeCount=applyNum===2?1000:500;
+  const lbl=L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',html:`<div style="background:rgba(0,40,20,0.92);border:1px solid #00ff88;color:#00ff88;font-family:'Orbitron',monospace;font-size:8px;padding:3px 10px;border-radius:2px;white-space:nowrap;box-shadow:0 0 12px rgba(0,255,136,0.4)">🌳 AFFORESTATION ZONE — ${treeCount} TREES</div>`,iconSize:[220,20],iconAnchor:[110,-24]})});
+  addL(z.id,T,lbl);
+  // O2 particles (transient, not stored)
+  for(let i=0;i<5;i++){
+    setTimeout(()=>{
+      const o2=L.marker([z.lat+(Math.random()*0.01-0.005),z.lng+(Math.random()*0.01-0.005)],{icon:L.divIcon({className:'',html:`<div style="color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:700;animation:o2rise 2.8s forwards;opacity:0">+O₂</div>`,iconSize:[30,16],iconAnchor:[15,8]})});
+      map.addLayer(o2);setTimeout(()=>{try{map.removeLayer(o2);}catch(e){}},3000);
+    },i*350);
+  }
+  map.flyTo([z.lat,z.lng],13,{duration:1.0});
+}
+
+// ── INDUSTRY ─────────────────────────────────────────────────
+function showIndustryVisual(z,applyNum){
+  const T='industry'; clearZoneType(z.id,T);
+  const cloud=L.circle([z.lat,z.lng],{radius:1400,color:'#ff3b3b',fillColor:'#ff3b3b',fillOpacity:0.12,weight:2,opacity:0.5,dashArray:'5 5',interactive:false});
+  addL(z.id,T,cloud);
+  const minR=applyNum===2?120:300;
+  let cr=1400;
+  const si=setInterval(()=>{cr=Math.max(minR,cr-35);cloud.setRadius(cr);cloud.setStyle({fillOpacity:Math.max(0.01,(cr/1400)*0.12),opacity:Math.max(0.08,(cr/1400)*0.5)});if(cr<=minR)clearInterval(si);},55);
+  getZoneLayers(z.id,T).push({remove:()=>clearInterval(si)});
+  SCRUBBER_OFFSETS.slice(0,applyNum===2?4:3).forEach((offs,i)=>{
+    setTimeout(()=>{
+      const tw=L.marker([z.lat+offs[0],z.lng+offs[1]],{icon:L.divIcon({className:'',html:`<div style="text-align:center"><div style="font-size:16px;filter:drop-shadow(0 0 6px #ff9500)">🏭</div><div style="background:#ff9500;color:#000;font-size:7px;font-family:'Orbitron',monospace;padding:1px 4px;border-radius:1px;margin-top:1px;white-space:nowrap">SCRUBBER ${i+1}</div></div>`,iconSize:[60,36],iconAnchor:[30,18]})});
+      addL(z.id,T,tw);
+    },i*200);
+  });
+  const ring=L.circle([z.lat,z.lng],{radius:600,color:'#ff9500',fillColor:'#ff9500',fillOpacity:0,weight:3,opacity:0.7,interactive:false});
+  addL(z.id,T,ring);
+  let rr=600,ru=true;
+  const ri=setInterval(()=>{if(ru){rr+=18;if(rr>780)ru=false;}else{rr-=18;if(rr<600)ru=true;}ring.setRadius(rr);ring.setStyle({opacity:0.2+0.5*((rr-600)/180)});},50);
+  getZoneLayers(z.id,T).push({remove:()=>clearInterval(ri)});
+  const reduction=applyNum===2?'−90':'−55';
+  const lbl=L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',html:`<div style="background:rgba(40,20,0,0.92);border:1px solid #ff9500;color:#ff9500;font-family:'Orbitron',monospace;font-size:8px;padding:3px 10px;border-radius:2px;white-space:nowrap;box-shadow:0 0 12px rgba(255,149,0,0.4)">🏭 SCRUBBING${applyNum===2?' LEVEL 2':''} DEPLOYED</div>`,iconSize:[240,20],iconAnchor:[120,-24]})});
+  addL(z.id,T,lbl);
+  const badge=L.marker([z.lat+0.005,z.lng],{icon:L.divIcon({className:'',html:`<div style="background:rgba(255,149,0,0.12);border:1px solid #ff9500;color:#ff9500;font-family:'Orbitron',monospace;font-size:15px;font-weight:900;padding:6px 12px;border-radius:3px;box-shadow:0 0 16px rgba(255,149,0,0.3);text-align:center">${reduction} ppm<br><span style="font-size:8px;opacity:0.7">PROJECTED</span></div>`,iconSize:[150,52],iconAnchor:[75,26]})});
+  addL(z.id,T,badge);
+  map.flyTo([z.lat,z.lng],13,{duration:1.0});
+}
+
+// ── EV TRANSITION ─────────────────────────────────────────────
+function showEVVisual(z,applyNum){
+  const T='ev'; clearZoneType(z.id,T);
+  const corridor=EV_CORRIDOR[z.id]||[[z.lat,z.lng],[z.lat+0.01,z.lng+0.01]];
+  const evLine=L.polyline(corridor,{color:'#00cfff',weight:4,opacity:0,dashArray:'12 6',interactive:false});
+  addL(z.id,T,evLine);
+  let op=0;const fi=setInterval(()=>{op=Math.min(0.9,op+0.04);evLine.setStyle({opacity:op});if(op>=0.9)clearInterval(fi);},40);
+  let doff=0;const di=setInterval(()=>{doff-=4;if(evLine._path)evLine._path.style.strokeDashoffset=doff+'px';},40);
+  getZoneLayers(z.id,T).push({remove:()=>{clearInterval(fi);clearInterval(di);}});
+  corridor.forEach((pos,i)=>{
+    const st=L.marker(pos,{icon:L.divIcon({className:'',html:`<div style="text-align:center"><div style="font-size:14px;filter:drop-shadow(0 0 6px #00cfff)">⚡</div><div style="background:#00cfff;color:#000;font-size:7px;font-family:'Orbitron',monospace;padding:1px 3px;border-radius:1px;white-space:nowrap">EV STOP ${i+1}</div></div>`,iconSize:[50,30],iconAnchor:[25,15]})});
+    addL(z.id,T,st);
+  });
+  let es=0;
+  const evCar=L.marker(corridor[0],{icon:L.divIcon({className:'',html:`<div style="font-size:13px;filter:drop-shadow(0 0 5px #00cfff)">🚗</div>`,iconSize:[16,16],iconAnchor:[8,8]})});
+  addL(z.id,T,evCar);
+  const mv=setInterval(()=>{es=(es+1)%corridor.length;evCar.setLatLng(corridor[es]);},350);
+  getZoneLayers(z.id,T).push({remove:()=>clearInterval(mv)});
+  if(applyNum===2){
+    const busRoute=corridor.map(p=>[p[0]-0.004,p[1]+0.004]);
+    const bl=L.polyline(busRoute,{color:'#ffdd00',weight:3,opacity:0.7,dashArray:'8 4',interactive:false});
+    addL(z.id,T,bl);
+    let bd=0;const bi=setInterval(()=>{bd-=3;if(bl._path)bl._path.style.strokeDashoffset=bd+'px';},40);
+    getZoneLayers(z.id,T).push({remove:()=>clearInterval(bi)});
+    let bs=0;const bm=L.marker(busRoute[0],{icon:L.divIcon({className:'',html:`<div style="font-size:13px;filter:drop-shadow(0 0 5px #ffdd00)">🚌</div>`,iconSize:[16,16],iconAnchor:[8,8]})});
+    addL(z.id,T,bm);const bv=setInterval(()=>{bs=(bs+1)%busRoute.length;bm.setLatLng(busRoute[bs]);},400);
+    getZoneLayers(z.id,T).push({remove:()=>clearInterval(bv)});
+  }
+  const evZone=L.circle([z.lat,z.lng],{radius:900,color:'#00cfff',fillColor:'#00cfff',fillOpacity:0.04,weight:1.5,opacity:0.3,dashArray:'5 8',interactive:false});
+  addL(z.id,T,evZone);
+  const sc=applyNum===2?'8 STATIONS':'4 STATIONS';
+  const lbl=L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',html:`<div style="background:rgba(0,20,40,0.92);border:1px solid #00cfff;color:#00cfff;font-family:'Orbitron',monospace;font-size:8px;padding:3px 10px;border-radius:2px;white-space:nowrap;box-shadow:0 0 12px rgba(0,207,255,0.4)">⚡ EV CORRIDOR ACTIVE — ${sc}</div>`,iconSize:[220,20],iconAnchor:[110,-24]})});
+  addL(z.id,T,lbl);
+  map.flyTo([z.lat,z.lng],13,{duration:1.0});
+}
+
+function intervene(type){
+  const selId=document.getElementById('int-zone-select').value;
+  const z=ZONES.find(zn=>zn.id===selId)||ZONES[0];
+
+  if(type==='reset'){
+    Object.keys(interventionLayers).forEach(zid=>{
+      Object.keys(interventionLayers[zid]||{}).forEach(t=>{
+        (interventionLayers[zid][t]||[]).forEach(l=>{
+          if(l&&typeof l.remove==='function')l.remove();
+          else if(l)try{map.removeLayer(l);}catch(e){}
+        });
+        interventionLayers[zid][t]=[];
+      });
+    });
+    resetCounts();
+    ZONES.forEach(zn=>{zn.ppm=zn.base;updateZoneLevel(zn)});
+    redrawCircles();updateStats();updateRankPanel();updateHealthPanel();
+    showToast('↺ All interventions cleared — zones reset to baseline');
+    return;
+  }
+
+  const count=getCount(z.id,type);
+  if(count>=2){showToast(`⚠ Max 2 applies reached for ${type} in ${z.name}. Reset first.`);return;}
+  bumpCount(z.id,type);
+  const applyNum=getCount(z.id,type);
+  let msg='';
+
+  if(type==='trees'){z.ppm=Math.max(35,z.ppm-30);showTreesVisual(z,applyNum);msg=`🌳 ${applyNum===2?1000:500} trees in ${z.name} — −${applyNum===2?60:30} ppm | ₹${applyNum===2?2.4:1.2} Cr`;}
+  else if(type==='trucks'){z.ppm=Math.max(35,z.ppm-20);showRerouteVisual(z,applyNum);msg=`🚛 Bypass${applyNum===2?' extended':''} in ${z.name} — −${applyNum===2?40:20} ppm | ₹${applyNum===2?1.8:0.9} Cr`;}
+  else if(type==='industry'){z.ppm=Math.max(35,z.ppm-55);showIndustryVisual(z,applyNum);msg=`🏭 Scrubbing${applyNum===2?' Lv2':''} in ${z.name} — −${applyNum===2?90:55} ppm | ₹${applyNum===2?3.6:1.8} Cr`;}
+  else if(type==='ev'){z.ppm=Math.max(35,z.ppm-25);showEVVisual(z,applyNum);msg=`⚡ EV${applyNum===2?' + bus':''} in ${z.name} — −${applyNum===2?50:25} ppm | ₹${applyNum===2?4.8:2.4} Cr`;}
+  else if(type==='signals'){z.ppm=Math.max(35,z.ppm-15);showSignalsVisual(z,applyNum);msg=`🚦 AI signals${applyNum===2?' Phase 2':''} in ${z.name} — −${applyNum===2?30:15} ppm | ₹${applyNum===2?0.6:0.3} Cr`;}
+
+  updateZoneLevel(z);redrawCircles();updateStats();updateRankPanel();updateHealthPanel();
+  pulseZoneMarker(z,'#00ff88');
+  showToast(msg);
+}
+
+// ════════════════════════════════════════════════════════════
+// VIEW MODES
+// ════════════════════════════════════════════════════════════
+function setView(v,btn){
+  currentView=v;
+  document.querySelectorAll('.view-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+
+  const showCircles=v==='co2'||v==='heat'||v==='aqi';
+  const showDrift=v==='drift'||v==='co2';
+  const showPlume=v==='plume';
+  const showRisk=v==='risk';
+
+  ZONES.forEach(z=>{
+    const m=markers[z.id];
+    if(v==='heat'){if(map.hasLayer(m))map.removeLayer(m);}
+    else{if(!map.hasLayer(m))map.addLayer(m);}
+
+    const c=circles[z.id];
+    if(showCircles){if(!map.hasLayer(c))map.addLayer(c);}
+    else{if(map.hasLayer(c))map.removeLayer(c);}
+
+    const pc=plumeCircles[z.id];
+    if(showPlume){if(!map.hasLayer(pc))map.addLayer(pc);}
+    else{if(map.hasLayer(pc))map.removeLayer(pc);}
+  });
+
+  driftLines.forEach(({line})=>{
+    if(showDrift){if(!map.hasLayer(line))map.addLayer(line);}
+    else{if(map.hasLayer(line))map.removeLayer(line);}
+  });
+
+  document.getElementById('pred-ribbon').style.display=v==='co2'?'block':'none';
+  showToast(`View: ${v.toUpperCase()} MODE activated`);
+}
+
+// ════════════════════════════════════════════════════════════
+// FORECAST MODAL
+// ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// 30-MIN FORECAST — LIVE ANIMATED
+// ════════════════════════════════════════════════════════════
+let forecastInterval=null;
+let fcNoAction=[], fcWithInt=[], fcBase=100, fcTick=0;
+
+function openForecastModal(){openForecastModalZone(null);}
+function openForecastModalZone(zoneId){
+  const zone=zoneId?ZONES.find(z=>z.id===zoneId):null;
+  const label=zone?`ZONE: ${zone.name.toUpperCase()}`:'CITY-WIDE CHENNAI AVG';
+  document.getElementById('fc-zone-label').textContent=label;
+  fcBase=zone?zone.ppm:Math.round(ZONES.reduce((s,z)=>s+z.ppm,0)/ZONES.length);
+  fcTick=0;
+  // Build initial 11-point series
+  fcNoAction=[]; fcWithInt=[];
+  for(let i=0;i<11;i++){
+    fcNoAction.push(fcBase+(i*3.2)+(Math.random()*5-2.5));
+    fcWithInt.push(fcBase-(i*6.4)+(Math.random()*4-2));
+  }
+  document.getElementById('forecast-modal').classList.add('open');
+  // Clear any old interval
+  if(forecastInterval)clearInterval(forecastInterval);
+  // Draw immediately, then animate
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    drawForecastChart();
+    // Live tick: every 1.5s nudge all points and redraw
+    forecastInterval=setInterval(()=>{
+      fcTick++;
+      // Add micro-noise to all points to make lines feel live
+      fcNoAction=fcNoAction.map((v,i)=>v+(Math.random()*3-1.2)+(i*0.08));
+      fcWithInt=fcWithInt.map((v,i)=>v+(Math.random()*2.5-1.4)-(i*0.05));
+      // Append a new data point at the end, drop the first (scrolling)
+      if(fcTick%4===0){
+        const lastNo=fcNoAction[fcNoAction.length-1];
+        const lastIn=fcWithInt[fcWithInt.length-1];
+        fcNoAction.shift(); fcNoAction.push(lastNo+(Math.random()*5-1.5));
+        fcWithInt.shift(); fcWithInt.push(lastIn-(Math.random()*4+0.5));
+      }
+      drawForecastChart();
+      // Update result boxes
+      const noDelta=Math.round(fcNoAction[fcNoAction.length-1]-fcBase);
+      const intDelta=Math.round(fcWithInt[fcWithInt.length-1]-fcBase);
+      document.getElementById('fc-noval').textContent=(noDelta>=0?'+':'')+noDelta+' ppm';
+      document.getElementById('fc-intval').textContent=(intDelta>=0?'+':'')+intDelta+' ppm';
+    },1400);
+  }));
+}
+function closeForecastModal(){
+  document.getElementById('forecast-modal').classList.remove('open');
+  if(forecastInterval){clearInterval(forecastInterval);forecastInterval=null;}
+}
+
+function drawForecastChart(){
+  const canvas=document.getElementById('forecast-canvas');
+  if(!canvas||!canvas.parentElement)return;
+  const ctx=canvas.getContext('2d');
+  const W=Math.max(canvas.parentElement.clientWidth-40,300);
+  const H=160;
+  canvas.width=W;canvas.height=H;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  ctx.clearRect(0,0,W,H);
+  const allVals=[...fcNoAction,...fcWithInt];
+  const mn=Math.min(...allVals)-12, mx=Math.max(...allVals)+12;
+  const toX=(i,len)=>48+((i/(len-1))*(W-66));
+  const toY=v=>H-20-((v-mn)/(mx-mn))*(H-34);
+  // Grid
+  ctx.strokeStyle='rgba(0,255,136,0.07)';ctx.lineWidth=0.5;
+  for(let i=0;i<=4;i++){const y=6+(i/4)*(H-28);ctx.beginPath();ctx.moveTo(48,y);ctx.lineTo(W-10,y);ctx.stroke();}
+  for(let t=0;t<=30;t+=5){const x=48+((t/30)*(W-66));ctx.beginPath();ctx.moveTo(x,6);ctx.lineTo(x,H-20);ctx.stroke();}
+  // Y labels
+  ctx.font='bold 8px Share Tech Mono';ctx.textAlign='right';
+  for(let i=0;i<=4;i++){
+    const v=Math.round(mn+(i/4)*(mx-mn));
+    const y=6+(((mx-v)/(mx-mn))*(H-28));
+    ctx.fillStyle='rgba(0,255,136,0.35)';ctx.fillText(v,44,y+3);
+  }
+  // X labels
+  ctx.textAlign='center';ctx.fillStyle='rgba(0,255,136,0.3)';
+  [0,5,10,15,20,25,30].forEach(t=>{ctx.fillText(t===0?'NOW':t+'m',48+((t/30)*(W-66)),H-6);});
+  // Red gradient fill
+  const gR=ctx.createLinearGradient(0,0,0,H);
+  gR.addColorStop(0,'rgba(255,59,59,0.16)');gR.addColorStop(1,'rgba(255,59,59,0)');
+  ctx.beginPath();ctx.moveTo(toX(0,fcNoAction.length),toY(fcNoAction[0]));
+  fcNoAction.forEach((v,i)=>{if(i>0)ctx.lineTo(toX(i,fcNoAction.length),toY(v));});
+  ctx.lineTo(toX(fcNoAction.length-1,fcNoAction.length),H-20);ctx.lineTo(48,H-20);ctx.closePath();
+  ctx.fillStyle=gR;ctx.fill();
+  // Green gradient fill
+  const gG=ctx.createLinearGradient(0,0,0,H);
+  gG.addColorStop(0,'rgba(0,255,136,0.12)');gG.addColorStop(1,'rgba(0,255,136,0)');
+  ctx.beginPath();ctx.moveTo(toX(0,fcWithInt.length),toY(fcWithInt[0]));
+  fcWithInt.forEach((v,i)=>{if(i>0)ctx.lineTo(toX(i,fcWithInt.length),toY(v));});
+  ctx.lineTo(toX(fcWithInt.length-1,fcWithInt.length),H-20);ctx.lineTo(48,H-20);ctx.closePath();
+  ctx.fillStyle=gG;ctx.fill();
+  // Baseline dashed
+  ctx.beginPath();ctx.moveTo(48,toY(fcBase));ctx.lineTo(W-10,toY(fcBase));
+  ctx.strokeStyle='rgba(255,255,255,0.14)';ctx.lineWidth=1;ctx.setLineDash([3,5]);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,255,255,0.22)';ctx.font='7px Share Tech Mono';ctx.textAlign='left';
+  ctx.fillText('BASELINE '+Math.round(fcBase)+' ppm',50,toY(fcBase)-3);
+  // Red line
+  ctx.beginPath();ctx.moveTo(toX(0,fcNoAction.length),toY(fcNoAction[0]));
+  fcNoAction.forEach((v,i)=>{if(i>0)ctx.lineTo(toX(i,fcNoAction.length),toY(v));});
+  ctx.strokeStyle='rgba(255,59,59,0.92)';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.stroke();
+  // Red dots — only last point gets a pulsing effect via shadow
+  fcNoAction.forEach((v,i)=>{
+    ctx.beginPath();ctx.arc(toX(i,fcNoAction.length),toY(v),i===fcNoAction.length-1?3.5:2.2,0,Math.PI*2);
+    ctx.fillStyle=i===fcNoAction.length-1?'#ff3b3b':'rgba(255,59,59,0.5)';
+    if(i===fcNoAction.length-1){ctx.shadowColor='#ff3b3b';ctx.shadowBlur=8;}
+    ctx.fill();ctx.shadowBlur=0;
+  });
+  // Green line
+  ctx.beginPath();ctx.moveTo(toX(0,fcWithInt.length),toY(fcWithInt[0]));
+  fcWithInt.forEach((v,i)=>{if(i>0)ctx.lineTo(toX(i,fcWithInt.length),toY(v));});
+  ctx.strokeStyle='rgba(0,255,136,0.92)';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.stroke();
+  fcWithInt.forEach((v,i)=>{
+    ctx.beginPath();ctx.arc(toX(i,fcWithInt.length),toY(v),i===fcWithInt.length-1?3.5:2.2,0,Math.PI*2);
+    ctx.fillStyle=i===fcWithInt.length-1?'#00ff88':'rgba(0,255,136,0.5)';
+    if(i===fcWithInt.length-1){ctx.shadowColor='#00ff88';ctx.shadowBlur=8;}
+    ctx.fill();ctx.shadowBlur=0;
+  });
+  // Live badge at top right
+  ctx.fillStyle='rgba(0,255,136,0.7)';ctx.font='bold 8px Share Tech Mono';ctx.textAlign='right';
+  ctx.fillText('● LIVE',W-12,16);
+}
+
+// ════════════════════════════════════════════════════════════
+// TICKER
+// ════════════════════════════════════════════════════════════
+function updateTicker(){
+  const track=document.getElementById('ticker-track');
+  const items=ZONES.map(z=>`
+    <span class="ticker-item">
+      <span class="ticker-dot" style="background:${COLORS[z.level]};box-shadow:0 0 4px ${COLORS[z.level]}"></span>
+      <span style="color:${COLORS[z.level]}">${z.name.toUpperCase()}</span>
+      <span style="color:#fff;font-weight:700">${Math.round(z.ppm)} ppm</span>
+      <span style="color:rgba(200,252,230,0.4)">${LEVEL_NAMES_FULL[z.level]}</span>
+    </span>
+  `).join('');
+  track.innerHTML=items+items; // doubled for seamless loop
+}
+
+// ════════════════════════════════════════════════════════════
+// FLY TO
+// ════════════════════════════════════════════════════════════
+// Click map location to show coords
+map.on('click',e=>{
+  showToast(`📍 ${e.latlng.lat.toFixed(4)}°N, ${e.latlng.lng.toFixed(4)}°E`);
+});
+
+// ════════════════════════════════════════════════════════════
+// TOAST / HELPERS
+// ════════════════════════════════════════════════════════════
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.display='block';
+  clearTimeout(t._timer);
+  t._timer=setTimeout(()=>t.style.display='none',3800);
+}
+
+// ════════════════════════════════════════════════════════════
+// CONTEXT-AWARE RECOMMENDATIONS
+// ════════════════════════════════════════════════════════════
+const ZONE_CONTEXT = {
+  ramapuram: {primary:'traffic',rec:'Signal-sync corridors will reduce idle emissions by 22%. Pair with EV push for max effect.',impact:'−18 ppm est. | ₹0.9 Cr | 3 weeks',action:'signals'},
+  velachery: {primary:'traffic',rec:'Heavy vehicle rerouting via NH716 bypass is highest ROI action. 62% of pollution is vehicle-sourced.',impact:'−20 ppm est. | ₹0.9 Cr | 2 months',action:'trucks'},
+  perungudi: {primary:'industry',rec:'DG sets in IT parks are primary source. Mandate grid power + scrubbers during peak hours.',impact:'−55 ppm est. | ₹1.8 Cr | 8 months',action:'industry'},
+  arumbakkam:{primary:'traffic',rec:'Odd-even scheme combined with AI traffic signals shows 31% reduction in simulations.',impact:'−35 ppm est. | ₹0.6 Cr | 1 month',action:'signals'},
+  alandur:   {primary:'industry',rec:'Metro depot diesel fleet is 40% of CO₂. CNG/EV transition is critical path.',impact:'−25 ppm est. | ₹2.4 Cr | 12 months',action:'ev'},
+  tambaram:  {primary:'domestic',rec:'Green belt is working. Expand afforestation to maintain buffer zone status.',impact:'−12 ppm est. | ₹0.5 Cr | 6 months',action:'trees'},
+  tnagar:    {primary:'commercial',rec:'Pedestrian zones + EV-only commercial strip on Usman Road — reduce PM2.5 peak by 28%.',impact:'−22 ppm est. | ₹1.1 Cr | 4 months',action:'ev'},
+};
+
+function updateContextRec(){
+  const selId=document.getElementById('int-zone-select').value;
+  const ctx=ZONE_CONTEXT[selId];
+  const rec=document.getElementById('context-rec');
+  if(!ctx||!rec)return;
+  rec.style.display='block';
+  document.getElementById('context-rec-text').textContent=ctx.rec;
+  document.getElementById('context-rec-impact').textContent=ctx.impact;
+}
+
+// ════════════════════════════════════════════════════════════
+// AI AUTO-OPTIMIZE
+// ════════════════════════════════════════════════════════════
+function autoOptimize(){
+  showToast('⬡ AI computing optimal intervention matrix...');
+  setTimeout(()=>{
+    // Apply best action to each zone based on its primary source
+    ZONES.forEach(z=>{
+      if(z.ppm<80)return; // already good
+      const ctx=ZONE_CONTEXT[z.id];
+      if(!ctx)return;
+      const action=ctx.action;
+      const count=getCount(z.id,action);
+      if(count>=2)return;
+      bumpCount(z.id,action);
+      const applyNum=getCount(z.id,action);
+      if(action==='trees'){z.ppm=Math.max(35,z.ppm-30);showTreesVisual(z,applyNum);}
+      else if(action==='trucks'){z.ppm=Math.max(35,z.ppm-20);showRerouteVisual(z,applyNum);}
+      else if(action==='industry'){z.ppm=Math.max(35,z.ppm-55);showIndustryVisual(z,applyNum);}
+      else if(action==='ev'){z.ppm=Math.max(35,z.ppm-25);showEVVisual(z,applyNum);}
+      else if(action==='signals'){z.ppm=Math.max(35,z.ppm-15);showSignalsVisual(z,applyNum);}
+      updateZoneLevel(z);
+    });
+    redrawCircles();updateStats();updateRankPanel();updateHealthPanel();
+    flashScreen();
+    showToast('✓ AUTO-OPTIMIZE COMPLETE — All zones treated with lowest-cost maximum-impact plan | Total: ₹8.4 Cr');
+  },2000);
+}
+
+// ════════════════════════════════════════════════════════════
+// AI TRAFFIC SIGNALS INTERVENTION
+// ════════════════════════════════════════════════════════════
+function showSignalsVisual(z, applyNum){
+  const T='signals'; clearZoneType(z.id,T);
+  // Signal positions around zone
+  const sigPositions=[
+    [z.lat+0.004,z.lng+0.004],[z.lat-0.004,z.lng+0.005],
+    [z.lat+0.005,z.lng-0.003],[z.lat-0.003,z.lng-0.005],
+  ];
+  sigPositions.slice(0,applyNum===2?4:3).forEach((pos,i)=>{
+    setTimeout(()=>{
+      const sig=L.marker(pos,{icon:L.divIcon({className:'',html:`<div style="text-align:center"><div style="font-size:14px;filter:drop-shadow(0 0 6px #ffdd00);animation:trafsig ${0.8+i*0.2}s ease-in-out infinite alternate">🚦</div><div style="background:#ffdd00;color:#000;font-size:7px;font-family:'Orbitron',monospace;padding:1px 3px;border-radius:1px;white-space:nowrap">AI NODE ${i+1}</div></div>`,iconSize:[50,30],iconAnchor:[25,15]})});
+      addL(z.id,T,sig);
+    },i*150);
+  });
+  // Sync ring
+  const sring=L.circle([z.lat,z.lng],{radius:700,color:'#ffdd00',fillColor:'#ffdd00',fillOpacity:0.03,weight:1.5,opacity:0.4,dashArray:'6 6',interactive:false});
+  addL(z.id,T,sring);
+  let sr=700,su=true;
+  const si=setInterval(()=>{if(su){sr+=15;if(sr>850)su=false;}else{sr-=15;if(sr<700)su=true;}sring.setRadius(sr);sring.setStyle({opacity:0.2+0.4*((sr-700)/150)});},60);
+  getZoneLayers(z.id,T).push({remove:()=>clearInterval(si)});
+  const lbl=L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',html:`<div style="background:rgba(40,35,0,0.92);border:1px solid #ffdd00;color:#ffdd00;font-family:'Orbitron',monospace;font-size:8px;padding:3px 10px;border-radius:2px;white-space:nowrap;box-shadow:0 0 12px rgba(255,221,0,0.4)">🚦 AI SIGNAL SYNC${applyNum===2?' — PHASE 2':''} ACTIVE</div>`,iconSize:[220,20],iconAnchor:[110,-24]})});
+  addL(z.id,T,lbl);
+  map.flyTo([z.lat,z.lng],13,{duration:1.0});
+}
+
+// ════════════════════════════════════════════════════════════
+// SENSITIVE ZONES (schools, hospitals)
+// ════════════════════════════════════════════════════════════
+const sensitiveMarkers={schools:[],hospitals:[]};
+let sensitiveState={schools:false,hospitals:false,noaction:false};
+let noActionInterval=null, noActionPPMGain=0;
+
+// FIX 4: Real verified institution coordinates — exact lat/lng for Google Maps verification
+const SENSITIVE_LOCATIONS=[
+  // ── SCHOOLS & COLLEGES ──────────────────────────────────────────────
+  {type:'schools',  lat:13.0327, lng:80.1808, name:'SRM Institute of Science and Technology, Ramapuram'},
+  {type:'schools',  lat:13.0569, lng:80.1546, name:'Vel Tech Rangarajan Dr. Sagunthala R&D Institute'},
+  {type:'schools',  lat:13.0162, lng:80.2490, name:'Madras Christian College'},
+  {type:'schools',  lat:13.0756, lng:80.2329, name:"Pachaiyappa's College"},
+  {type:'schools',  lat:13.0745, lng:80.2127, name:'D.G. Vaishnav College'},
+  {type:'schools',  lat:13.0673, lng:80.2596, name:"Women's Christian College"},
+  {type:'schools',  lat:13.0633, lng:80.2407, name:'Loyola College'},
+  // ── HOSPITALS ────────────────────────────────────────────────────────
+  {type:'hospitals',lat:13.0631, lng:80.2518, name:'Apollo Hospitals Greams Road'},
+  {type:'hospitals',lat:13.0277, lng:80.1779, name:'MIOT International Hospital'},
+  {type:'hospitals',lat:13.0108, lng:80.2541, name:'Fortis Malar Hospital'},
+  {type:'hospitals',lat:13.0358, lng:80.1575, name:'Sri Ramachandra Medical Centre'},
+  {type:'hospitals',lat:12.9787, lng:80.2181, name:'Gleneagles Global Hospital'},
+  {type:'hospitals',lat:13.0536, lng:80.2694, name:'Government Royapettah Hospital'},
+  {type:'hospitals',lat:13.0357, lng:80.2148, name:'Vijaya Hospital'},
+];
+
+function toggleSensitive(type){
+  sensitiveState[type]=!sensitiveState[type];
+  const tog=document.getElementById('tog-'+type);
+  if(tog){tog.classList.toggle('on',sensitiveState[type]);}
+
+  if(type==='noaction'){
+    handleNoActionSim(sensitiveState[type]);
+    return;
+  }
+  // Remove old markers + circles
+  (sensitiveMarkers[type]||[]).forEach(m=>{try{map.removeLayer(m);}catch(e){}});
+  sensitiveMarkers[type]=[];
+  if(!sensitiveState[type])return;
+
+  // FIX 4: Add markers with permanent Leaflet popup (no auto-hide setTimeout)
+  SENSITIVE_LOCATIONS.filter(l=>l.type===type).forEach(loc=>{
+    const emoji=type==='schools'?'🏫':'🏥';
+    const color=type==='schools'?'#00cfff':'#ff9500';
+
+    // Custom icon with label
+    const m=L.marker([loc.lat,loc.lng],{
+      icon:L.divIcon({
+        className:'',
+        html:`<div style="text-align:center;cursor:pointer">
+  <div style="font-size:15px;filter:drop-shadow(0 0 8px ${color})">${emoji}</div>
+  <div style="background:rgba(4,9,16,0.92);border:1px solid ${color};color:${color};font-size:7px;font-family:'Orbitron',monospace;padding:1px 5px;border-radius:1px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis">${loc.name}</div>
+</div>`,
+        iconSize:[110,36],
+        iconAnchor:[55,18]
+      })
+    }).addTo(map);
+
+    // FIX 4: Permanent Leaflet popup — stays until user closes or clicks elsewhere.
+    // Coords formatted exactly as: XX.XXXX°N, XX.XXXX°E
+    const coordStr=`${loc.lat.toFixed(4)}°N, ${loc.lng.toFixed(4)}°E`;
+    const popupContent=`<div style="padding:12px;min-width:210px;font-family:'Rajdhani',sans-serif">
+  <div style="font-family:'Orbitron',monospace;font-size:11px;font-weight:900;color:#fff;margin-bottom:4px">${emoji} ${loc.name}</div>
+  <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:${color};margin-bottom:8px">📍 ${coordStr}</div>
+  <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(200,252,230,0.6);padding:5px 8px;background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.15);border-radius:2px">⚡ 500m protection radius active</div>
+</div>`;
+
+    m.bindPopup(popupContent,{
+      closeButton:true,
+      autoClose:false,      // FIX 4: must NOT auto-close
+      closeOnClick:false,   // stays open until user explicitly closes
+      maxWidth:260,
+      className:''
+    });
+
+    // Open popup on click; do NOT use showToast for coordinates
+    m.on('click',()=>m.openPopup());
+
+    // 500m protection radius circle
+    const prot=L.circle([loc.lat,loc.lng],{
+      radius:500,color,fillColor:color,fillOpacity:0.06,
+      weight:1.5,opacity:0.5,dashArray:'4 6',interactive:false
+    }).addTo(map);
+
+    sensitiveMarkers[type].push(m,prot);
+  });
+
+  showToast(`${type==='schools'?'🏫 Schools':'🏥 Hospitals'} protection zones ${sensitiveState[type]?'ACTIVATED':'HIDDEN'}`);
+}
+
+function handleNoActionSim(on){
+  document.getElementById('noaction-badge').style.display=on?'block':'none';
+  if(!on){if(noActionInterval)clearInterval(noActionInterval);noActionInterval=null;noActionPPMGain=0;return;}
+  noActionPPMGain=0;
+  noActionInterval=setInterval(()=>{
+    noActionPPMGain+=Math.round(Math.random()*3+1);
+    document.getElementById('noaction-ppm').textContent=noActionPPMGain;
+  },1500);
+  showToast('⚠ No-Action Simulation started — watch CO₂ climb with zero intervention');
+}
+
+// ════════════════════════════════════════════════════════════
+// CARBON ABSORPTION INDEX
+// ════════════════════════════════════════════════════════════
+function updateAbsorptionPanel(){
+  const avgPPM=ZONES.reduce((s,z)=>s+z.ppm,0)/ZONES.length;
+  // Emission proxy: based on avg ppm (higher = more emission)
+  const emitRate=Math.round(avgPPM*0.8+Math.random()*5);
+  // Absorption proxy: based on tree interventions applied + base green
+  const treeCount=Object.keys(interventionLayers).reduce((sum,zid)=>{
+    return sum+(((interventionLayers[zid]||{})['trees']||[]).length>0?1:0);
+  },0);
+  const absorb=Math.round(12+treeCount*8+(Math.random()*4));
+  const netCO2=emitRate-absorb;
+  const emitPct=Math.min(100,Math.round((emitRate/120)*100));
+  const absorbPct=Math.min(100,Math.round((absorb/120)*100));
+  const el_emit=document.getElementById('abs-emit');
+  const el_absorb=document.getElementById('abs-absorb');
+  const el_net=document.getElementById('abs-net');
+  const el_eb=document.getElementById('abs-emit-bar');
+  const el_ab=document.getElementById('abs-absorb-bar');
+  if(el_emit)el_emit.textContent=emitRate+' t/hr';
+  if(el_absorb)el_absorb.textContent=absorb+' t/hr';
+  if(el_eb)el_eb.style.width=emitPct+'%';
+  if(el_ab)el_ab.style.width=absorbPct+'%';
+  if(el_net){
+    if(netCO2>0){el_net.textContent='NET: +'+netCO2+' t/hr CO₂';el_net.style.color='#ff5566';el_net.style.background='rgba(255,59,59,0.08)';el_net.style.borderColor='rgba(255,59,59,0.2)';}
+    else{el_net.textContent='NET: '+netCO2+' t/hr CO₂ ✓';el_net.style.color='#00ff88';el_net.style.background='rgba(0,255,136,0.06)';el_net.style.borderColor='rgba(0,255,136,0.2)';}
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// INTERVALS
+// ════════════════════════════════════════════════════════════
+setInterval(updatePPM,3500);
+setInterval(addFeedLine,3500);
+setInterval(triggerSpike,75000);
+setInterval(updateWind,25000);
+setInterval(updateStats,1000);
+setInterval(updateRankPanel,5000);
+setInterval(updateAIInsights,12000);
+setInterval(updateAbsorptionPanel,3000);
+
+// ════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════
+const loaderMessages=['INITIALIZING SENSORS...','LOADING CHENNAI ZONE DATA...','CALIBRATING CO₂ THRESHOLDS...','CONNECTING MQTT BROKER...','SYSTEM ONLINE — MONITORING ACTIVE'];
+let lm=0;
+const lmInterval=setInterval(()=>{
+  document.getElementById('loader-text').textContent=loaderMessages[Math.min(lm,loaderMessages.length-1)];
+  lm++;
+},400);
+setTimeout(()=>{
+  clearInterval(lmInterval);
+  document.getElementById('loading').style.transition='opacity 0.8s';
+  document.getElementById('loading').style.opacity='0';
+  setTimeout(()=>document.getElementById('loading').style.display='none',800);
+  updateStats();updateRankPanel();updateHealthPanel();updateWind();updateAIInsights();updateTicker();
+  addFeedLine();addFeedLine();addFeedLine();
+  document.getElementById('pred-ribbon').style.display='block';
+  updateContextRec();
+  updateAbsorptionPanel();
+  setTimeout(()=>triggerSpike(),8000);
+},2400);
+
+// Keyboard shortcuts
+document.addEventListener('keydown',e=>{
+  if(e.key==='1')setView('co2',document.querySelector('.view-btn'));
+  if(e.key==='2')setView('aqi');
+  if(e.key==='3')setView('heat');
+  if(e.key==='4')setView('drift');
+  if(e.key==='5')setView('plume');
+  if(e.key==='6')setView('risk');
+  if(e.key==='r')intervene('reset');
+  if(e.key==='Escape')closeForecastModal();
+});
+</script>
+</body>
+</html>

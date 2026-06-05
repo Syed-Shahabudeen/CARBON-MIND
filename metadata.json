@@ -1,0 +1,6 @@
+{
+  "name": "CarbonMind — Urban CO₂ Decision Intelligence System",
+  "description": "An advanced urban air quality decision intelligence platform for Chennai, providing real-time monitoring, AI-driven cause analysis, and intervention simulations.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["AI Chat", "Data Visualization", "Simulation", "PDF Reporting"]
+}

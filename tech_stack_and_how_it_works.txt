@@ -1,0 +1,50 @@
+# Tech Stack & How It Works: CarbonMind
+
+## Tech Stack
+
+### Frontend Framework
+- **React 18:** Functional components with Hooks (useEffect, useState, useMemo).
+- **Vite:** High-performance build tool and dev server.
+- **TypeScript:** Ensuring type safety for data models like Zones, Messages, and Simulation States.
+
+### Styling & UI
+- **Tailwind CSS:** Utility-first styling with a custom professional technical theme.
+- **Framer Motion:** High-end staggered animations, transitions, and interactive component feedback.
+- **Lucide React:** Modern, consistent iconography.
+- **Google Fonts:** Utilizing 'Space Grotesk' (Display), 'Inter' (Body), and 'JetBrains Mono' (Data).
+
+### State Management
+- **Zustand:** A lightweight global state store handling:
+  - Real-time zone data updates.
+  - User selection and navigation state.
+  - Persistent chat history for VayuBot.
+  - Simulation parameters.
+
+### Data Visualization
+- **Recharts:** Responsive SVG-based charts for forecasting and causal analysis.
+
+### AI Integration
+- **Google GenAI SDK (@google/genai):** Direct frontend integration with the Gemini 2.0 Flash model.
+  - Context Injection: System prompts are dynamically populated with real-time zone metrics before sending user queries.
+
+### Document Generation
+- **jsPDF:** Client-side PDF generation for mission-critical reporting.
+
+---
+
+## How It Works
+
+### 1. Data Simulation (Mock MQTT)
+In the absence of physical sensor hardware, the `Dashboard.tsx` and `Home.tsx` components use a background `setInterval` hook. This timer periodically triggers a Zustand action that applies a random walk (jitter) to the PPM values of all 7 zones, simulating a live data feed from IoT sensors.
+
+### 2. The Decision Logic Store
+The application's "brain" is the Zustand store in `src/store.ts`. It manages the `INITIAL_ZONES` array. Every color-coding logic (e.g., green for <50 PPM) is centrally defined and consumed across the Gauge, ZoneCards, and Ticker components to ensure consistency.
+
+### 3. AI Situational Awareness
+When a user asks VayuBot a question, the application takes the current state of all zones from the store, converts it into a structured text string (Context), and prepends it to the user's prompt. This allows the AI to give highly specific answers like "Tambaram is your safest node right now" without the user providing that data.
+
+### 4. Predictive UI Pattern
+The "Predictive Forecast" uses a dual-line strategy in Recharts. The first line (`noAction`) is extrapolated based on current trends, while the second line (`intervention`) is calculated using a reduction coefficient derived from the active simulation parameters, providing a visual "What-If" analysis.
+
+### 5. Responsive Technical Design
+The UI follows a desktop-first responsive strategy. It uses a custom Tailwind theme defined in `index.css` that maps custom variables (like `--color-carbon-primary`) to utility classes, allowing for consistent branding across all modules.

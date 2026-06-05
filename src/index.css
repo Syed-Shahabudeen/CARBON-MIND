@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-orbitron: "Orbitron", sans-serif;
+  --font-rajdhani: "Rajdhani", sans-serif;
+  --font-mono: "Share Tech Mono", monospace;
+
+  --color-carbon-bg: #050a08;
+  --color-carbon-card: rgba(10, 31, 18, 0.4);
+  --color-carbon-primary: #00ff88;
+  --color-carbon-danger: #ff3b3b;
+  --color-carbon-warning: #ffb100;
+  --color-carbon-caution: #ffd60a;
+  --color-carbon-safe: #34c759;
+  --color-carbon-cyan: #4cc9f0;
+  
+  --color-text-dim: #4a7a5c;
+}
+
+@layer base {
+  body {
+    @apply bg-carbon-bg text-[#e8eee9] font-rajdhani antialiased;
+    background-image: 
+      radial-gradient(circle at 80% 20%, rgba(0, 255, 136, 0.02) 0%, transparent 40%),
+      radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.01) 0%, transparent 40%);
+    background-attachment: fixed;
+  }
+}
+
+.panel-title {
+  @apply text-white/40 text-[10px] font-bold uppercase flex items-center gap-3 mb-6 tracking-[0.3em];
+}
+
+.panel-title::before {
+  content: '';
+  @apply w-[2px] h-[10px] bg-carbon-primary inline-block;
+}
+
+.panel-card {
+  @apply bg-[#0a1f12]/40 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-8 shadow-2xl;
+}
+
+.glow-primary {
+  box-shadow: 0 0 40px rgba(0, 255, 136, 0.1);
+}
+
+.text-glow-primary {
+  text-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+}
+
+.organic-card {
+  @apply bg-[#0a1f12]/60 backdrop-blur-2xl border border-white/[0.05] rounded-[24px] p-8 shadow-2xl;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-white/5 rounded-full;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-carbon-primary/20;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes marquee-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee-scroll 28s linear infinite;
+}
